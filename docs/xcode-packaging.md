@@ -54,6 +54,8 @@ If either entitlement is missing, the script fails before you launch the app.
 
 For production distribution, create an Xcode project/archive because Endpoint Security requires a signed System Extension bundle and valid provisioning profiles.
 
+For the GitHub Actions path that signs, notarizes, staples, and uploads the current SwiftPM-packaged artifact, see `docs/github-actions-signing.md`.
+
 ## Required Targets
 
 Create an Xcode project with these targets:

@@ -31,6 +31,16 @@ HOST_BUNDLE_ID="${MACFSW_HOST_BUNDLE_ID:-$(read_xcconfig_value MACFSW_HOST_BUNDL
 EXTENSION_BUNDLE_ID="${MACFSW_EXTENSION_BUNDLE_ID:-$(read_xcconfig_value MACFSW_EXTENSION_BUNDLE_ID)}"
 XPC_SERVICE_NAME="${MACFSW_XPC_SERVICE_NAME:-$(read_xcconfig_value MACFSW_XPC_SERVICE_NAME)}"
 CODE_SIGN="${CODE_SIGN:-1}"
+CODE_SIGN_IDENTITY_PATTERN="${CODE_SIGN_IDENTITY_PATTERN:-Apple Development}"
+CODE_SIGN_TIMESTAMP="${CODE_SIGN_TIMESTAMP:-none}"
+
+if [[ "$CODE_SIGN_TIMESTAMP" == "1" || "$CODE_SIGN_TIMESTAMP" == "true" || "$CODE_SIGN_TIMESTAMP" == "yes" ]]; then
+  CODE_SIGN_TIMESTAMP_ARGS=(--timestamp)
+elif [[ "$CODE_SIGN_TIMESTAMP" == "0" || "$CODE_SIGN_TIMESTAMP" == "false" || "$CODE_SIGN_TIMESTAMP" == "no" || "$CODE_SIGN_TIMESTAMP" == "none" ]]; then
+  CODE_SIGN_TIMESTAMP_ARGS=(--timestamp=none)
+else
+  CODE_SIGN_TIMESTAMP_ARGS=(--timestamp="$CODE_SIGN_TIMESTAMP")
+fi
 
 if [[ -z "$XPC_SERVICE_NAME" ]]; then
   XPC_SERVICE_NAME="$DEVELOPMENT_TEAM.$EXTENSION_BUNDLE_ID.xpc"
@@ -130,7 +140,7 @@ find_identity() {
   local line identity_hash identity_name
 
   while IFS= read -r line; do
-    [[ "$line" == *"Apple Development"* ]] || continue
+    [[ "$line" == *"$CODE_SIGN_IDENTITY_PATTERN"* ]] || continue
 
     identity_hash="$(printf '%s\n' "$line" | awk '{print $2}')"
     identity_name="$(printf '%s\n' "$line" | sed -n 's/.*"\(.*\)".*/\1/p')"
@@ -147,7 +157,7 @@ if [[ "$CODE_SIGN" == "1" ]]; then
   IDENTITY="${CODE_SIGN_IDENTITY:-$(find_identity)}"
   if [[ -z "$IDENTITY" ]]; then
     cat >&2 <<EOF
-No Apple Development signing identity for team $DEVELOPMENT_TEAM was found.
+No $CODE_SIGN_IDENTITY_PATTERN signing identity for team $DEVELOPMENT_TEAM was found.
 
 Set CODE_SIGN_IDENTITY to a signing identity hash/name, or run with CODE_SIGN=0
 to build an unsigned .app bundle for structure inspection only.
@@ -180,12 +190,12 @@ EOF
     exit 4
   fi
 
-  codesign --force --timestamp=none --options runtime --generate-entitlement-der \
+  codesign --force "${CODE_SIGN_TIMESTAMP_ARGS[@]}" --options runtime --generate-entitlement-der \
     --entitlements "$CONFIG_DIR/MacFSWSystemExtension.entitlements" \
     --sign "$IDENTITY" \
     "$EXT_BUNDLE"
 
-  codesign --force --timestamp=none --options runtime --generate-entitlement-der \
+  codesign --force "${CODE_SIGN_TIMESTAMP_ARGS[@]}" --options runtime --generate-entitlement-der \
     --entitlements "$CONFIG_DIR/MacFSWApp.entitlements" \
     --sign "$IDENTITY" \
     "$APP_BUNDLE"

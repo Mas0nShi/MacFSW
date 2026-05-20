@@ -1,0 +1,209 @@
+name: macOS signed release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-signed-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  signed-release:
+    name: Build, sign, notarize
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    env:
+      APP_NAME: MacFSW
+      CONFIGURATION: release
+      OUTPUT_DIR: ${{ github.workspace }}/.build/release-artifacts
+      MACOS_CODESIGN_IDENTITY: ${{ vars.MACOS_CODESIGN_IDENTITY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Test
+        run: swift test --disable-sandbox
+
+      - name: Import signing certificate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          decode_base64() {
+            local value="$1"
+            local destination="$2"
+
+            printf '%s' "$value" | base64 --decode > "$destination" 2>/dev/null \
+              || printf '%s' "$value" | base64 -D > "$destination"
+          }
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/macos-signing-certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/macfsw-signing.keychain-db"
+
+          decode_base64 "$MACOS_CERTIFICATE_P12_BASE64" "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          security import "$CERTIFICATE_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$MACOS_KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Install provisioning profiles
+        env:
+          MACFSW_HOST_PROVISIONPROFILE_BASE64: ${{ secrets.MACFSW_HOST_PROVISIONPROFILE_BASE64 }}
+          MACFSW_EXTENSION_PROVISIONPROFILE_BASE64: ${{ secrets.MACFSW_EXTENSION_PROVISIONPROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          decode_base64() {
+            local value="$1"
+            local destination="$2"
+
+            printf '%s' "$value" | base64 --decode > "$destination" 2>/dev/null \
+              || printf '%s' "$value" | base64 -D > "$destination"
+          }
+
+          PROFILE_DIR="$RUNNER_TEMP/provisioning-profiles"
+          HOST_PROFILE="$PROFILE_DIR/MacFSWHost.provisionprofile"
+          EXTENSION_PROFILE="$PROFILE_DIR/MacFSWEndpointExtension.provisionprofile"
+
+          mkdir -p "$PROFILE_DIR"
+          decode_base64 "$MACFSW_HOST_PROVISIONPROFILE_BASE64" "$HOST_PROFILE"
+          decode_base64 "$MACFSW_EXTENSION_PROVISIONPROFILE_BASE64" "$EXTENSION_PROFILE"
+
+          echo "MACFSW_HOST_PROVISIONING_PROFILE=$HOST_PROFILE" >> "$GITHUB_ENV"
+          echo "MACFSW_EXTENSION_PROVISIONING_PROFILE=$EXTENSION_PROFILE" >> "$GITHUB_ENV"
+
+      - name: Package signed app bundle
+        env:
+          CODE_SIGN_IDENTITY: ${{ vars.MACOS_CODESIGN_IDENTITY }}
+          CODE_SIGN_IDENTITY_PATTERN: Developer ID Application
+          CODE_SIGN_TIMESTAMP: "true"
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          set -o pipefail
+
+          mkdir -p "$OUTPUT_DIR"
+          PACKAGE_LOG="$RUNNER_TEMP/package.log"
+
+          Scripts/package-dev-app.sh 2>&1 | tee "$PACKAGE_LOG"
+          APP_PATH="$(tail -n 1 "$PACKAGE_LOG")"
+
+          test -d "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Create signed DMG
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME:-manual-${GITHUB_RUN_NUMBER}}"
+          VERSION="${VERSION#v}"
+          VERSION="$(printf '%s' "$VERSION" | tr '/[:space:]' '-' | tr -cd 'A-Za-z0-9._-')"
+          DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
+
+          rm -f "$DMG_PATH"
+          hdiutil create \
+            -volname "$APP_NAME" \
+            -srcfolder "$APP_PATH" \
+            -ov \
+            -format UDZO \
+            "$DMG_PATH"
+
+          SIGNING_IDENTITY="$MACOS_CODESIGN_IDENTITY"
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+              | sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' \
+              | head -n 1)"
+          fi
+
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "No Developer ID Application identity was found for signing the DMG." >&2
+            exit 1
+          fi
+
+          codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG_PATH"
+          codesign --verify --verbose=2 "$DMG_PATH"
+
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+
+      - name: Notarize and staple
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          xcrun stapler staple "$DMG_PATH"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macfsw-signed-dmg
+          path: ${{ env.DMG_PATH }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release asset
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$DMG_PATH" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$DMG_PATH" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Signed and notarized macOS build for $GITHUB_REF_NAME."
+          fi
+
+      - name: Delete temporary keychain
+        if: always()
+        run: |
+          if [[ -n "${KEYCHAIN_PATH:-}" && -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi

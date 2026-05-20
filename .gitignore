@@ -8,6 +8,9 @@ DerivedData/
 *.moved-aside
 *.hmap
 *.ipa
+*.p12
+*.provisionprofile
+*.mobileprovision
 *.dSYM.zip
 *.dSYM
 *.swp
