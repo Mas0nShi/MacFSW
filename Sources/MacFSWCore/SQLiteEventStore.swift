@@ -24,19 +24,18 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
     private let ownedDirectoryURL: URL?
     private var nextSequence: UInt64
     private var didCleanupBackingStore = false
+    private var resultSnapshots: [String: StoredResultSnapshot] = [:]
     private static let temporaryDirectoryPrefix = "macfsw-"
     private static let baseIndexSQL = [
         "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestampNS)",
         "CREATE INDEX IF NOT EXISTS idx_events_type ON events(eventType)",
         "CREATE INDEX IF NOT EXISTS idx_events_operation_class ON events(operationClass)",
-        "CREATE INDEX IF NOT EXISTS idx_events_risk ON events(riskScore)",
         "CREATE INDEX IF NOT EXISTS idx_events_pid ON events(pid)",
         "CREATE INDEX IF NOT EXISTS idx_events_process_name ON events(processName)",
         "CREATE INDEX IF NOT EXISTS idx_events_signing ON events(signingID)",
         "CREATE INDEX IF NOT EXISTS idx_events_team ON events(teamID)",
         "CREATE INDEX IF NOT EXISTS idx_events_pid_audit_time ON events(pid, auditToken, timestampNS, sequence)",
         "CREATE INDEX IF NOT EXISTS idx_events_pid_executable_time ON events(pid, executablePath, timestampNS, sequence)",
-        "CREATE INDEX IF NOT EXISTS idx_result_rows_event ON result_rows(snapshotID, eventID)",
     ]
     private static let largeFilterIndexSQL = [
         "CREATE INDEX IF NOT EXISTS idx_events_pid_time ON events(pid, timestampNS, sequence)",
@@ -60,6 +59,7 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         var configuration = Configuration()
         configuration.prepareDatabase { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
+            try db.execute(sql: "PRAGMA busy_timeout = 5000")
         }
         self.dbQueue = try DatabaseQueue(path: url.path, configuration: configuration)
         try Self.migrate(dbQueue)
@@ -124,28 +124,30 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
             return MacFSWEventAppendResult(events: [], stats: try await stats())
         }
 
-        var sequenced = incoming
-        for index in sequenced.indices {
-            sequenced[index].sequence = nextSequence
-            nextSequence += 1
-        }
-        let eventsToInsert = sequenced
-
-        try await dbQueue.write { db in
+        let sequenced = try await dbQueue.write { db in
+            let databaseNextSequence = try Self.readNextSequence(db)
+            var sequence = databaseNextSequence
+            var eventsToInsert = incoming
+            for index in eventsToInsert.indices {
+                eventsToInsert[index].sequence = sequence
+                sequence += 1
+            }
             for event in eventsToInsert {
                 try Self.insert(event, db: db)
             }
+            return eventsToInsert
         }
+        nextSequence = (sequenced.last?.sequence ?? (nextSequence - 1)) + 1
 
         return MacFSWEventAppendResult(events: sequenced, stats: try await stats())
     }
 
     public func clear() async throws {
         try await dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM result_snapshots")
             try db.execute(sql: "DELETE FROM event_fts")
             try db.execute(sql: "DELETE FROM events")
         }
+        resultSnapshots.removeAll(keepingCapacity: true)
         nextSequence = 1
     }
 
@@ -177,82 +179,15 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         sortOrder: MacFSWEventSortOrder = .oldestFirst
     ) async throws -> MacFSWEventResultSnapshot {
         let snapshotID = UUID().uuidString
-        let compiled = MacFSWSQLQueryCompiler.compile(query)
-        let compiledArguments = MacFSWSQLQueryCompiler.arguments(compiled.arguments)
-        return try await dbQueue.write { db in
-            let total = try Int.fetchOne(
-                db,
-                sql: "SELECT COUNT(*) FROM events WHERE \(compiled.whereSQL)",
-                arguments: compiledArguments
-            ) ?? 0
-            let visibleCount = query.visibleCount(totalCount: total)
-            try db.execute(
-                sql: """
-                INSERT INTO result_snapshots (id, createdAt, totalCount, visibleCount)
-                VALUES (?, ?, ?, ?)
-                """,
-                arguments: [snapshotID, Date().timeIntervalSince1970, total, visibleCount]
-            )
-            guard visibleCount > 0 else {
-                return MacFSWEventResultSnapshot(id: snapshotID, totalCount: total, visibleCount: 0)
-            }
-
-            let snapshotSQL: String
-            var arguments = compiled.arguments
-            arguments.insert(MacFSWSQLValue(snapshotID), at: 0)
-            switch sortOrder {
-            case .oldestFirst:
-                if query.hasVisibleLimit {
-                    snapshotSQL = """
-                    INSERT INTO result_rows (snapshotID, rowIndex, eventID, sequence)
-                    SELECT ?, ROW_NUMBER() OVER (ORDER BY timestampNS ASC, sequence ASC) - 1, id, sequence
-                    FROM (
-                        SELECT id, sequence, timestampNS
-                        FROM events
-                        WHERE \(compiled.whereSQL)
-                        ORDER BY timestampNS DESC, sequence DESC
-                        LIMIT ?
-                    )
-                    ORDER BY timestampNS ASC, sequence ASC
-                    """
-                    arguments.append(MacFSWSQLValue(visibleCount))
-                } else {
-                    snapshotSQL = """
-                    INSERT INTO result_rows (snapshotID, rowIndex, eventID, sequence)
-                    SELECT ?, ROW_NUMBER() OVER (ORDER BY timestampNS ASC, sequence ASC) - 1, id, sequence
-                    FROM events
-                    WHERE \(compiled.whereSQL)
-                    ORDER BY timestampNS ASC, sequence ASC
-                    """
-                }
-            case .newestFirst:
-                if query.hasVisibleLimit {
-                    snapshotSQL = """
-                    INSERT INTO result_rows (snapshotID, rowIndex, eventID, sequence)
-                    SELECT ?, ROW_NUMBER() OVER (ORDER BY timestampNS DESC, sequence DESC) - 1, id, sequence
-                    FROM (
-                        SELECT id, sequence, timestampNS
-                        FROM events
-                        WHERE \(compiled.whereSQL)
-                        ORDER BY timestampNS ASC, sequence ASC
-                        LIMIT ?
-                    )
-                    ORDER BY timestampNS DESC, sequence DESC
-                    """
-                    arguments.append(MacFSWSQLValue(visibleCount))
-                } else {
-                    snapshotSQL = """
-                    INSERT INTO result_rows (snapshotID, rowIndex, eventID, sequence)
-                    SELECT ?, ROW_NUMBER() OVER (ORDER BY timestampNS DESC, sequence DESC) - 1, id, sequence
-                    FROM events
-                    WHERE \(compiled.whereSQL)
-                    ORDER BY timestampNS DESC, sequence DESC
-                    """
-                }
-            }
-            try db.execute(sql: snapshotSQL, arguments: MacFSWSQLQueryCompiler.arguments(arguments))
-            return MacFSWEventResultSnapshot(id: snapshotID, totalCount: total, visibleCount: visibleCount)
-        }
+        let total = try await totalCount(matching: query)
+        let visibleCount = query.visibleCount(totalCount: total)
+        resultSnapshots[snapshotID] = StoredResultSnapshot(
+            query: query,
+            sortOrder: sortOrder,
+            totalCount: total,
+            visibleCount: visibleCount
+        )
+        return MacFSWEventResultSnapshot(id: snapshotID, totalCount: total, visibleCount: visibleCount)
     }
 
     public func deleteResultSnapshot(_ snapshotID: String) async throws {
@@ -264,10 +199,8 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         guard !snapshotIDs.isEmpty else {
             return
         }
-        try await dbQueue.write { db in
-            for snapshotID in snapshotIDs {
-                try db.execute(sql: "DELETE FROM result_snapshots WHERE id = ?", arguments: [snapshotID])
-            }
+        for snapshotID in snapshotIDs {
+            resultSnapshots[snapshotID] = nil
         }
     }
 
@@ -275,65 +208,47 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         in snapshot: MacFSWEventResultSnapshot,
         visibleRange: Range<Int>
     ) async throws -> [MacFSWEventRowSummary] {
-        let lowerBound = max(0, min(snapshot.visibleCount, visibleRange.lowerBound))
-        let upperBound = max(lowerBound, min(snapshot.visibleCount, visibleRange.upperBound))
-        guard lowerBound < upperBound else {
+        guard let stored = resultSnapshots[snapshot.id] else {
             return []
         }
-        return try await dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: """
-                SELECT e.id, e.sequence, e.timestampNS, e.eventType, e.operationClass, e.risk,
-                       e.processName, e.pid, e.targetPath, e.sourcePath, e.detailSummary,
-                       e.signingID, e.teamID
-                FROM result_rows r
-                JOIN events e ON e.id = r.eventID
-                WHERE r.snapshotID = ? AND r.rowIndex >= ? AND r.rowIndex < ?
-                ORDER BY r.rowIndex ASC
-                """,
-                arguments: [snapshot.id, lowerBound, upperBound]
-            )
-            return rows.map(rowSummary(from:))
-        }
+        return try await rowSummaries(
+            matching: stored.query,
+            visibleRange: visibleRange,
+            totalCount: stored.totalCount,
+            sortOrder: stored.sortOrder
+        )
     }
 
     public func event(
         in snapshot: MacFSWEventResultSnapshot,
         visibleRow: Int
     ) async throws -> MacFSWFileEvent? {
-        guard visibleRow >= 0, visibleRow < snapshot.visibleCount else {
+        guard let stored = resultSnapshots[snapshot.id],
+              visibleRow >= 0,
+              visibleRow < stored.visibleCount else {
             return nil
         }
-        return try await dbQueue.read { db in
-            guard let row = try Row.fetchOne(
-                db,
-                sql: """
-                SELECT e.*
-                FROM result_rows r
-                JOIN events e ON e.id = r.eventID
-                WHERE r.snapshotID = ? AND r.rowIndex = ?
-                LIMIT 1
-                """,
-                arguments: [snapshot.id, visibleRow]
-            ) else {
-                return nil
-            }
-            return try eventRecord(from: row)
-        }
+        return try await event(
+            matching: stored.query,
+            visibleRow: visibleRow,
+            totalCount: stored.totalCount,
+            sortOrder: stored.sortOrder
+        )
     }
 
     public func visibleRowIndex(
         of id: UUID,
         in snapshot: MacFSWEventResultSnapshot
     ) async throws -> Int? {
-        try await dbQueue.read { db in
-            try Int.fetchOne(
-                db,
-                sql: "SELECT rowIndex FROM result_rows WHERE snapshotID = ? AND eventID = ? LIMIT 1",
-                arguments: [snapshot.id, id.uuidString]
-            )
+        guard let stored = resultSnapshots[snapshot.id] else {
+            return nil
         }
+        return try await visibleRowIndex(
+            of: id,
+            matching: stored.query,
+            totalCount: stored.totalCount,
+            sortOrder: stored.sortOrder
+        )
     }
 
     public func appendRowsToResultSnapshot(
@@ -346,48 +261,16 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         }
         let hasVisibleLimit = limit > 0
         let visibleLimit = hasVisibleLimit ? limit : Int.max
-        let appended = hasVisibleLimit ? Array(rows.suffix(visibleLimit)) : rows
-        return try await dbQueue.write { db in
-            let stored = try Row.fetchOne(
-                db,
-                sql: "SELECT totalCount, visibleCount FROM result_snapshots WHERE id = ?",
-                arguments: [snapshot.id]
-            )
-            let currentTotal: Int = stored?["totalCount"] ?? snapshot.totalCount
-            let currentVisible: Int = stored?["visibleCount"] ?? snapshot.visibleCount
-            let overflow = hasVisibleLimit ? max(0, currentVisible + appended.count - visibleLimit) : 0
-            if hasVisibleLimit, appended.count >= visibleLimit {
-                try db.execute(sql: "DELETE FROM result_rows WHERE snapshotID = ?", arguments: [snapshot.id])
-            } else if overflow > 0 {
-                try db.execute(
-                    sql: "DELETE FROM result_rows WHERE snapshotID = ? AND rowIndex < ?",
-                    arguments: [snapshot.id, overflow]
-                )
-                try db.execute(
-                    sql: "UPDATE result_rows SET rowIndex = rowIndex - ? WHERE snapshotID = ?",
-                    arguments: [overflow, snapshot.id]
-                )
-            }
-
-            let baseIndex = hasVisibleLimit && appended.count >= visibleLimit ? 0 : max(0, currentVisible - overflow)
-            for (offset, row) in appended.enumerated() {
-                try db.execute(
-                    sql: """
-                    INSERT OR REPLACE INTO result_rows (snapshotID, rowIndex, eventID, sequence)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    arguments: [snapshot.id, baseIndex + offset, row.id.uuidString, Int64(row.sequence)]
-                )
-            }
-
-            let nextTotal = currentTotal + rows.count
-            let nextVisible = hasVisibleLimit ? min(visibleLimit, currentVisible + rows.count) : currentVisible + rows.count
-            try db.execute(
-                sql: "UPDATE result_snapshots SET totalCount = ?, visibleCount = ? WHERE id = ?",
-                arguments: [nextTotal, nextVisible, snapshot.id]
-            )
-            return MacFSWEventResultSnapshot(id: snapshot.id, totalCount: nextTotal, visibleCount: nextVisible)
+        let currentTotal = resultSnapshots[snapshot.id]?.totalCount ?? snapshot.totalCount
+        let currentVisible = resultSnapshots[snapshot.id]?.visibleCount ?? snapshot.visibleCount
+        let nextTotal = currentTotal + rows.count
+        let nextVisible = hasVisibleLimit ? min(visibleLimit, currentVisible + rows.count) : currentVisible + rows.count
+        if var stored = resultSnapshots[snapshot.id] {
+            stored.totalCount = nextTotal
+            stored.visibleCount = nextVisible
+            resultSnapshots[snapshot.id] = stored
         }
+        return MacFSWEventResultSnapshot(id: snapshot.id, totalCount: nextTotal, visibleCount: nextVisible)
     }
 
     public func rowSummaries(
@@ -424,7 +307,7 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         arguments.append(MacFSWSQLValue(window.limit))
         arguments.append(MacFSWSQLValue(window.offset))
         let sql = """
-        SELECT id, sequence, timestampNS, eventType, operationClass, risk,
+        SELECT id, sequence, timestampNS, eventType, operationClass,
                processName, pid, targetPath, sourcePath, detailSummary, signingID, teamID
         FROM events
         WHERE \(compiled.whereSQL)
@@ -678,7 +561,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         let source = session.metadata.source.rawValue
         let captureConfigJSON = String(data: try JSONEncoder.macfsw.encode(session.captureConfig), encoding: .utf8) ?? "{}"
         let savedQueriesJSON = String(data: try JSONEncoder.macfsw.encode(session.savedQueries), encoding: .utf8) ?? "[]"
-        let markers = session.markers
         let annotations = session.annotations
 
         try await dbQueue.write { db in
@@ -704,19 +586,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                     savedQueriesJSON,
                 ]
             )
-
-            try db.execute(sql: "DELETE FROM markers")
-            for marker in markers {
-                try db.execute(
-                    sql: "INSERT INTO markers (id, timestampNS, title, note) VALUES (?, ?, ?, ?)",
-                    arguments: [
-                        marker.id.uuidString,
-                        Int64(marker.timestampNS),
-                        marker.title,
-                        marker.note,
-                    ]
-                )
-            }
 
             try db.execute(sql: "DELETE FROM annotations")
             for annotation in annotations {
@@ -753,8 +622,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 [MacFSWSavedQuery].self,
                 from: Data(savedQueriesJSON.utf8)
             )
-            let markers = try Row.fetchAll(db, sql: "SELECT * FROM markers ORDER BY timestampNS ASC")
-                .map(marker(from:))
             let annotations = try Row.fetchAll(db, sql: "SELECT * FROM annotations ORDER BY createdAt ASC")
                 .map(annotation(from:))
 
@@ -776,7 +643,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                     updatedAt: Date(timeIntervalSince1970: updatedAt),
                     source: MacFSWSessionSource(rawValue: sourceText) ?? .live
                 ),
-                markers: markers,
                 annotations: annotations,
                 savedQueries: savedQueries
             )
@@ -803,7 +669,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
     }
 
     private static func insert(_ event: MacFSWFileEvent, db: Database) throws {
-        let riskReasonsText = event.riskReasons.joined(separator: " ")
         let sourcePath = event.sourcePath
         let signingID = event.process.signingID
         let teamID = event.process.teamID
@@ -823,8 +688,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
             signingID,
             teamID,
             event.process.isPlatformBinary ? "true yes 1 on" : "false no 0 off",
-            event.risk.rawValue,
-            riskReasonsText,
             String(event.uid),
             String(event.gid),
             "\(event.uid)/\(event.gid)",
@@ -840,16 +703,14 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         ].compactMap { $0 }.joined(separator: " ")
         let flagsText = String(event.flags)
         let fileIDText = event.fileID.map(String.init)
-        let riskReasonsJSON = String(data: try JSONEncoder.macfsw.encode(event.riskReasons), encoding: .utf8) ?? "[]"
         let parametersJSON = String(data: try JSONEncoder.macfsw.encode(event.parameters), encoding: .utf8) ?? "[]"
         let appleControlled = event.process.isAppleControlledForStorage
-        let sensitive = MacFSWRiskClassifier.isSensitivePath(event.targetPath)
 
         try db.execute(
             sql: """
             INSERT INTO events (
-                id, sequence, timestampNS, eventType, operationClass, risk, riskScore,
-                riskReasonsJSON, riskReasonsText, pid, pidText, auditToken, executablePath,
+                id, sequence, timestampNS, eventType, operationClass,
+                pid, pidText, auditToken, executablePath,
                 processName, signingID, teamID, cdhash, isPlatformBinary,
                 isPlatformBinaryText, appleControlled, appleControlledText,
                 targetPath, sourcePath, parameterText, detailSummary, parametersJSON,
@@ -857,11 +718,11 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 uid, uidText, gid, gidText, uidGidText, rawEventType,
                 rawEventTypeValue, rawEventTypeValueText, rawEventVersion,
                 rawEventVersionText, sequenceText, timestampText,
-                mutation, mutationText, sensitive, sensitiveText
+                mutation, mutationText
             )
             VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             arguments: [
@@ -870,10 +731,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 Int64(event.timestampNS),
                 event.eventType.rawValue,
                 event.operationClass.rawValue,
-                event.risk.rawValue,
-                event.risk.score,
-                riskReasonsJSON,
-                riskReasonsText,
                 Int(event.process.pid),
                 String(event.process.pid),
                 event.process.auditToken,
@@ -908,8 +765,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 String(event.timestampNS),
                 event.eventType.isMutation ? 1 : 0,
                 event.eventType.isMutation.queryTextForStorage,
-                sensitive ? 1 : 0,
-                sensitive.queryTextForStorage,
             ]
         )
 
@@ -917,9 +772,9 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
             sql: """
             INSERT INTO event_fts (
                 rowid, any_text, process_text, executable_text, path_text,
-                signing_text, team_text, risk_reason_text
+                signing_text, team_text
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 Int64(event.sequence),
@@ -929,7 +784,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 [event.targetPath, sourcePath].compactMap { $0 }.joined(separator: " "),
                 signingID ?? "",
                 teamID ?? "",
-                riskReasonsText,
             ]
         )
     }
@@ -953,15 +807,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
             """)
 
             try db.execute(sql: """
-            CREATE TABLE IF NOT EXISTS markers (
-                id TEXT PRIMARY KEY NOT NULL,
-                timestampNS INTEGER NOT NULL,
-                title TEXT NOT NULL,
-                note TEXT NOT NULL
-            )
-            """)
-
-            try db.execute(sql: """
             CREATE TABLE IF NOT EXISTS annotations (
                 id TEXT PRIMARY KEY NOT NULL,
                 eventID TEXT NOT NULL,
@@ -978,10 +823,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 timestampNS INTEGER NOT NULL,
                 eventType TEXT NOT NULL,
                 operationClass TEXT NOT NULL,
-                risk TEXT NOT NULL,
-                riskScore INTEGER NOT NULL,
-                riskReasonsJSON TEXT NOT NULL,
-                riskReasonsText TEXT NOT NULL,
                 pid INTEGER NOT NULL,
                 pidText TEXT NOT NULL,
                 auditToken TEXT NOT NULL,
@@ -1015,9 +856,7 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 sequenceText TEXT NOT NULL,
                 timestampText TEXT NOT NULL,
                 mutation INTEGER NOT NULL,
-                mutationText TEXT NOT NULL,
-                sensitive INTEGER NOT NULL,
-                sensitiveText TEXT NOT NULL
+                mutationText TEXT NOT NULL
             )
             """)
 
@@ -1029,28 +868,7 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 path_text,
                 signing_text,
                 team_text,
-                risk_reason_text,
                 tokenize = 'unicode61'
-            )
-            """)
-
-            try db.execute(sql: """
-            CREATE TABLE IF NOT EXISTS result_snapshots (
-                id TEXT PRIMARY KEY NOT NULL,
-                createdAt REAL NOT NULL,
-                totalCount INTEGER NOT NULL,
-                visibleCount INTEGER NOT NULL
-            )
-            """)
-
-            try db.execute(sql: """
-            CREATE TABLE IF NOT EXISTS result_rows (
-                snapshotID TEXT NOT NULL,
-                rowIndex INTEGER NOT NULL,
-                eventID TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                PRIMARY KEY (snapshotID, rowIndex),
-                FOREIGN KEY (snapshotID) REFERENCES result_snapshots(id) ON DELETE CASCADE
             )
             """)
 
@@ -1058,65 +876,18 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
                 try db.execute(sql: indexSQL)
             }
         }
-        migrator.registerMigration("add_process_filter_indexes_v2") { db in
-            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_events_pid_audit_time ON events(pid, auditToken, timestampNS, sequence)")
-            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_events_pid_executable_time ON events(pid, executablePath, timestampNS, sequence)")
-        }
-        migrator.registerMigration("add_result_snapshots_v3") { db in
-            try db.execute(sql: """
-            CREATE TABLE IF NOT EXISTS result_snapshots (
-                id TEXT PRIMARY KEY NOT NULL,
-                createdAt REAL NOT NULL,
-                totalCount INTEGER NOT NULL,
-                visibleCount INTEGER NOT NULL
-            )
-            """)
-            try db.execute(sql: """
-            CREATE TABLE IF NOT EXISTS result_rows (
-                snapshotID TEXT NOT NULL,
-                rowIndex INTEGER NOT NULL,
-                eventID TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                PRIMARY KEY (snapshotID, rowIndex),
-                FOREIGN KEY (snapshotID) REFERENCES result_snapshots(id) ON DELETE CASCADE
-            )
-            """)
-            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_result_rows_event ON result_rows(snapshotID, eventID)")
-        }
-        migrator.registerMigration("add_event_parameters_v4") { db in
-            let existingColumns = Set(try db.columns(in: "events").map(\.name))
-            if !existingColumns.contains("parameterText") {
-                try db.execute(sql: "ALTER TABLE events ADD COLUMN parameterText TEXT NOT NULL DEFAULT ''")
-            }
-            if !existingColumns.contains("detailSummary") {
-                try db.execute(sql: "ALTER TABLE events ADD COLUMN detailSummary TEXT NOT NULL DEFAULT ''")
-            }
-            if !existingColumns.contains("parametersJSON") {
-                try db.execute(sql: "ALTER TABLE events ADD COLUMN parametersJSON TEXT NOT NULL DEFAULT '[]'")
-            }
-        }
-        migrator.registerMigration("add_large_filter_indexes_v5") { db in
-            for indexSQL in largeFilterIndexSQL {
-                try db.execute(sql: indexSQL)
-            }
-        }
-        migrator.registerMigration("add_raw_event_type_value_v6") { db in
-            let existingColumns = Set(try db.columns(in: "events").map(\.name))
-            if !existingColumns.contains("rawEventTypeValue") {
-                try db.execute(sql: "ALTER TABLE events ADD COLUMN rawEventTypeValue INTEGER")
-            }
-            if !existingColumns.contains("rawEventTypeValueText") {
-                try db.execute(sql: "ALTER TABLE events ADD COLUMN rawEventTypeValueText TEXT NOT NULL DEFAULT ''")
-            }
-        }
         try migrator.migrate(dbQueue)
     }
 
     private static func readNextSequence(_ dbQueue: DatabaseQueue) throws -> UInt64 {
         try dbQueue.read { db in
-            let maxSequence = try Int64.fetchOne(db, sql: "SELECT MAX(sequence) FROM events") ?? 0
-            return UInt64(max(0, maxSequence)) + 1
+            try readNextSequence(db)
         }
+    }
+
+    private static func readNextSequence(_ db: Database) throws -> UInt64 {
+        let maxSequence = try Int64.fetchOne(db, sql: "SELECT MAX(sequence) FROM events") ?? 0
+        return UInt64(max(0, maxSequence)) + 1
     }
 
     private static func ensureSession(_ session: MacFSWResearchSession, dbQueue: DatabaseQueue) throws {
@@ -1160,13 +931,19 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
     }
 }
 
+private struct StoredResultSnapshot: Sendable {
+    var query: MacFSWEventQuery
+    var sortOrder: MacFSWEventSortOrder
+    var totalCount: Int
+    var visibleCount: Int
+}
+
 private func rowSummary(from row: Row) -> MacFSWEventRowSummary {
     let idText: String = row["id"]
     let sequence: Int64 = row["sequence"]
     let timestampNS: Int64 = row["timestampNS"]
     let eventTypeText: String = row["eventType"]
     let operationClassText: String = row["operationClass"]
-    let riskText: String = row["risk"]
     let signingID: String? = row["signingID"]
     let teamID: String? = row["teamID"]
     return MacFSWEventRowSummary(
@@ -1175,7 +952,6 @@ private func rowSummary(from row: Row) -> MacFSWEventRowSummary {
         timestampNS: UInt64(timestampNS),
         eventType: MacFSWEventType(rawValue: eventTypeText) ?? .unknown,
         operationClass: MacFSWOperationClass(rawValue: operationClassText) ?? .unknown,
-        risk: MacFSWRiskLevel(rawValue: riskText) ?? .low,
         processName: row["processName"],
         pid: Int32(row["pid"] as Int),
         targetPath: row["targetPath"],
@@ -1226,9 +1002,6 @@ private func eventRecord(from row: Row) throws -> MacFSWFileEvent {
     let timestampNS: Int64 = row["timestampNS"]
     let eventTypeText: String = row["eventType"]
     let operationClassText: String = row["operationClass"]
-    let riskText: String = row["risk"]
-    let riskReasonsJSON: String = row["riskReasonsJSON"]
-    let riskReasons = try JSONDecoder.macfsw.decode([String].self, from: Data(riskReasonsJSON.utf8))
     let parametersJSON: String = row["parametersJSON"]
     let parameters = (try? JSONDecoder.macfsw.decode([MacFSWEventParameter].self, from: Data(parametersJSON.utf8))) ?? []
     let fileIDText: String? = row["fileIDText"]
@@ -1242,8 +1015,6 @@ private func eventRecord(from row: Row) throws -> MacFSWFileEvent {
         timestampNS: UInt64(timestampNS),
         eventType: MacFSWEventType(rawValue: eventTypeText) ?? .unknown,
         operationClass: MacFSWOperationClass(rawValue: operationClassText) ?? .unknown,
-        risk: MacFSWRiskLevel(rawValue: riskText) ?? .low,
-        riskReasons: riskReasons,
         process: MacFSWProcessIdentity(
             pid: Int32(row["pid"] as Int),
             auditToken: row["auditToken"],
@@ -1264,17 +1035,6 @@ private func eventRecord(from row: Row) throws -> MacFSWFileEvent {
         rawEventType: row["rawEventType"],
         rawEventTypeValue: rawEventTypeValue.map { UInt32($0) },
         rawEventVersion: UInt32(rawEventVersion)
-    )
-}
-
-private func marker(from row: Row) -> MacFSWMarker {
-    let idText: String = row["id"]
-    let timestampNS: Int64 = row["timestampNS"]
-    return MacFSWMarker(
-        id: UUID(uuidString: idText) ?? UUID(),
-        timestampNS: UInt64(timestampNS),
-        title: row["title"],
-        note: row["note"]
     )
 }
 

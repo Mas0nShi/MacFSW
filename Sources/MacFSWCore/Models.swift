@@ -88,26 +88,6 @@ public enum MacFSWOperationClass: String, Codable, CaseIterable, Identifiable, S
     public var id: String { rawValue }
 }
 
-public enum MacFSWRiskLevel: String, Codable, CaseIterable, Comparable, Identifiable, Sendable {
-    case low
-    case medium
-    case high
-
-    public var id: String { rawValue }
-
-    public static func < (lhs: MacFSWRiskLevel, rhs: MacFSWRiskLevel) -> Bool {
-        lhs.score < rhs.score
-    }
-
-    public var score: Int {
-        switch self {
-        case .low: 0
-        case .medium: 1
-        case .high: 2
-        }
-    }
-}
-
 public struct MacFSWProcessIdentity: Codable, Equatable, Hashable, Sendable {
     public var pid: Int32
     public var auditToken: String
@@ -203,8 +183,6 @@ public struct MacFSWFileEvent: Identifiable, Codable, Equatable, Hashable, Senda
     public var timestampNS: UInt64
     public var eventType: MacFSWEventType
     public var operationClass: MacFSWOperationClass
-    public var risk: MacFSWRiskLevel
-    public var riskReasons: [String]
     public var process: MacFSWProcessIdentity
     public var targetPath: String
     public var sourcePath: String?
@@ -223,8 +201,6 @@ public struct MacFSWFileEvent: Identifiable, Codable, Equatable, Hashable, Senda
         timestampNS: UInt64 = MacFSWClock.nowNanoseconds(),
         eventType: MacFSWEventType,
         operationClass: MacFSWOperationClass? = nil,
-        risk: MacFSWRiskLevel = .low,
-        riskReasons: [String] = [],
         process: MacFSWProcessIdentity,
         targetPath: String,
         sourcePath: String? = nil,
@@ -242,8 +218,6 @@ public struct MacFSWFileEvent: Identifiable, Codable, Equatable, Hashable, Senda
         self.timestampNS = timestampNS
         self.eventType = eventType
         self.operationClass = operationClass ?? eventType.operationClass
-        self.risk = risk
-        self.riskReasons = riskReasons
         self.process = process
         self.targetPath = targetPath
         self.sourcePath = sourcePath
@@ -332,25 +306,6 @@ public struct MacFSWFileEvent: Identifiable, Codable, Equatable, Hashable, Senda
             }
             return sourcePath.map { "Source: \($0)" } ?? ""
         }
-    }
-}
-
-public struct MacFSWMarker: Identifiable, Codable, Equatable, Sendable {
-    public var id: UUID
-    public var timestampNS: UInt64
-    public var title: String
-    public var note: String
-
-    public init(
-        id: UUID = UUID(),
-        timestampNS: UInt64 = MacFSWClock.nowNanoseconds(),
-        title: String = "Marker",
-        note: String = ""
-    ) {
-        self.id = id
-        self.timestampNS = timestampNS
-        self.title = title
-        self.note = note
     }
 }
 

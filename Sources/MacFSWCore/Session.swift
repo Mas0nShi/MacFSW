@@ -14,7 +14,7 @@ public struct MacFSWSessionMetadata: Codable, Equatable, Sendable {
 
     public init(
         schemaVersion: Int = 1,
-        appVersion: String = "0.1.5",
+        appVersion: String = "unknown",
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         source: MacFSWSessionSource = .live
@@ -33,7 +33,6 @@ public struct MacFSWResearchSession: Identifiable, Codable, Equatable, Sendable 
     public var targetDescription: String
     public var captureConfig: MacFSWCaptureConfig
     public var metadata: MacFSWSessionMetadata
-    public var markers: [MacFSWMarker]
     public var annotations: [MacFSWAnnotation]
     public var savedQueries: [MacFSWSavedQuery]
 
@@ -43,7 +42,6 @@ public struct MacFSWResearchSession: Identifiable, Codable, Equatable, Sendable 
         targetDescription: String = "",
         captureConfig: MacFSWCaptureConfig = MacFSWCaptureConfig(),
         metadata: MacFSWSessionMetadata = MacFSWSessionMetadata(),
-        markers: [MacFSWMarker] = [],
         annotations: [MacFSWAnnotation] = [],
         savedQueries: [MacFSWSavedQuery] = MacFSWSavedQuery.defaults
     ) {
@@ -52,7 +50,6 @@ public struct MacFSWResearchSession: Identifiable, Codable, Equatable, Sendable 
         self.targetDescription = targetDescription
         self.captureConfig = captureConfig
         self.metadata = metadata
-        self.markers = markers
         self.annotations = annotations
         self.savedQueries = savedQueries
     }
@@ -75,7 +72,6 @@ public struct MacFSWSavedQuery: Identifiable, Codable, Equatable, Sendable {
             MacFSWSavedQuery(name: "Mutations", query: MacFSWQueryParser.parse("mutation:true")),
             MacFSWSavedQuery(name: "Deletes", query: MacFSWQueryParser.parse("op:unlink")),
             MacFSWSavedQuery(name: "Metadata", query: MacFSWQueryParser.parse("class:metadata")),
-            MacFSWSavedQuery(name: "Sensitive Paths", query: MacFSWQueryParser.parse("sensitive:true")),
         ]
     }
 }

@@ -10,7 +10,7 @@ MacFSW answers questions such as:
 
 - Which process touched this file?
 - What did a target XPC service write, delete, rename, or chmod?
-- Did a process modify sensitive locations such as LaunchAgents, preferences, caches, temporary directories, or application support folders?
+- Did a process modify important locations such as LaunchAgents, preferences, caches, temporary directories, or application support folders?
 - What file-system side effects happened during a specific reproduction step?
 - Which events provide useful supporting detail for vulnerability analysis or a bug report?
 
@@ -68,12 +68,15 @@ MacFSW uses a Swift-only architecture.
 
 ```text
 MacFSW.app
-  - UI
+  - SwiftUI feature views
+  - App Coordinator
+  - Feature Stores
   - Session Manager
   - Capture Controller
-  - In-memory Event Store
+  - SQLite-backed temporary Event Store
   - Query and Filter Engine
-  - Import / Export
+  - Analysis Beta
+  - Save / Open Session
 
 MacFSWSystemExtension
   - XPC CaptureStream endpoint
@@ -85,7 +88,7 @@ MacFSWSystemExtension
   - Drop / backpressure statistics
 ```
 
-The System Extension does not manage product Sessions, save files, query history, or store events on disk.
+The System Extension does not manage product Sessions, save files, query history, analysis, or store events on disk.
 
 ## 6. System Extension Responsibility
 
@@ -107,7 +110,6 @@ It is not responsible for:
 - Session names
 - saved views
 - user annotations
-- markers
 - import / export
 - SQLite or other persistent storage
 - product-level query syntax
@@ -161,7 +163,7 @@ Endpoint Security provides low-level controls such as event subscription, proces
 
 ## 9. App Responsibility
 
-The App is the product core.
+The App is the product core. App code is organized around a Coordinator plus feature stores so that UI views stay focused on rendering and user intent.
 
 It is responsible for:
 
@@ -169,11 +171,11 @@ It is responsible for:
 - connecting to the System Extension
 - starting and stopping capture streams
 - receiving event batches
-- storing current Session data in memory
+- storing current Session data in an App-owned temporary SQLite store
 - rendering the live console
 - searching and filtering events
 - showing event detail
-- adding markers, tags, and notes
+- running process-scoped Analysis Beta when explicitly requested
 - saving and opening native Session files
 
 The App should support multiple Sessions, but v1 should allow only one active CaptureStream at a time.
@@ -189,7 +191,6 @@ Session data includes:
 - capture configuration
 - target description
 - event list
-- markers
 - notes
 - tags
 - saved views
@@ -238,20 +239,20 @@ Future extensions:
 
 ## 12. In-Memory Event Store
 
-By default, events are not persisted.
+By default, unsaved events are temporary.
 
-The App maintains an in-memory event store optimized for append, search, and UI virtualization.
+The App maintains an App-owned SQLite event store optimized for append, search, snapshots, and UI virtualization. Unsaved temporary backing stores are cleaned when sessions are replaced or the app exits cleanly. A saved `.macfsw-session` file is the explicit durable artifact.
 
 Required capabilities:
 
 - append batched events
 - keep capture order and timestamp order
 - support large event counts
-- support memory limits
+- support bounded row-window loading for large result sets
 - track dropped / omitted events
-- support fast filtering by time, process, PID, event type, path, signing identity, and risk hints
+- support fast filtering by time, process, PID, event type, path, signing identity, and raw event metadata
 
-If event volume exceeds memory limits, the App may offer an explicit temporary spill mode. This is still App-owned and should not turn the System Extension into a storage service.
+This storage is still App-owned and should not turn the System Extension into a storage service.
 
 ## 13. Query and Search
 
@@ -270,11 +271,9 @@ Basic filters:
 - signing ID: `signing:com.apple.*`
 - team ID: `team:UYF*`
 - platform binary: `platform:true`
-- risk: `risk:high`, `risk>=medium`
-- risk reasons: `reason:sensitive*`
 - UID/GID: `uid:501`, `gid:20`, `uidgid:501/20`
 - raw event fields: `id:*`, `sequence>=1000`, `timestamp>0`, `rawtype:ES_EVENT_TYPE_NOTIFY_*`, `version:4`, `flags:0x*`
-- derived research shortcuts: `mutation:true`, `sensitive:true`, `apple:false`
+- derived research shortcuts: `mutation:true`, `apple:false`
 
 All string fields support case-insensitive wildcard matching with `*` and `?`. Adjacent terms are `AND`; `OR`, `NOT`, parentheses, comma-separated value lists, equality, inequality, and numeric comparisons are supported in the App query layer.
 
@@ -287,7 +286,7 @@ signing:com.apple.* path:/private/var
 (op:chmod OR op:chown) path:/Library
 path:/Library/LaunchAgents NOT platform:true
 team:UYF* signing:com.mas0n.*
-sequence>=1000 risk>=medium
+sequence>=1000 path:/Library
 ```
 
 Advanced queries are App-level analysis features. They should not be pushed into the System Extension.
@@ -303,7 +302,6 @@ Toolbar
   Record / Stop
   Freeze View
   Clear View
-  Mark Time
   Save
   Export
 
@@ -331,7 +329,6 @@ The event table is the primary surface. It must be dense, virtualized, keyboard-
 Default table columns:
 
 - time
-- risk
 - operation
 - process
 - PID
@@ -346,23 +343,22 @@ The UI should distinguish:
 - `Stop`: stops ES capture
 - `Freeze View`: stops live scrolling/rendering, but does not stop capture
 - `Clear View`: clears visible/current unsaved events after confirmation
-- `Mark Time`: inserts a timeline marker
 
-## 15. Risk and Signal Design
+## 15. Signal Design
 
-Risk should be presented as a research hint, not as an automated vulnerability verdict.
+MacFSW should present captured facts directly and avoid automated severity labels.
 
 High-signal examples:
 
 - writes to LaunchAgents or LaunchDaemons
 - chmod / chown / setacl
-- delete or rename of sensitive files
+- delete or rename of protected files
 - writes to preferences or TCC-related paths
 - unsigned or third-party process touching privileged locations
 - unexpected writes by an XPC service
 - file replacement patterns involving rename or exchangedata
 
-Risk labels should remain explainable. The UI should show why an event was highlighted.
+The UI should make these patterns easy to query and inspect without assigning a verdict.
 
 ## 16. Save and Open Sessions
 
@@ -379,7 +375,7 @@ Session files are the only persisted project artifact in v1. Opening a saved Ses
 
 ## 17. Privacy and Security
 
-MacFSW captures sensitive data:
+MacFSW captures private data:
 
 - file paths
 - process identities
@@ -440,7 +436,6 @@ v1 should include:
 - event Inspector
 - basic filters
 - advanced query MVP
-- Mark Time
 - Save / Open Session
 - dropped event and capture health UI
 
@@ -478,7 +473,7 @@ Phase 3: Analysis Workspace
 - basic filters
 - query bar
 - saved views
-- markers and notes
+- notes
 
 Phase 4: File Workflows
 
@@ -491,7 +486,6 @@ Phase 5: Security Research Depth
 - better process identity
 - signing metadata
 - launchd / XPC attribution where practical
-- risk hints
 - related event grouping
 - comparison between Sessions
 
@@ -502,10 +496,10 @@ Open product questions:
 - What should the default memory limit be?
 - Should verbose read capture be hidden behind an advanced toggle?
 - Should saved Sessions use SQLite, JSONL, or a package format combining both?
-- How much risk classification should v1 include?
 - What is the minimum viable advanced query grammar?
 - How should MacFSW identify XPC service ownership reliably?
 - Should imports be editable, read-only, or editable with local annotations?
+- Should future annotation concepts be represented as session notes, tags, or separate saved views?
 
 ## 22. Final Direction
 
@@ -515,4 +509,4 @@ The System Extension should be minimal: it captures and streams events only whil
 
 The App should be the full research workspace: Sessions, search, filtering, analysis, annotation, save/open, and UI.
 
-This architecture minimizes system overhead, keeps privileged code small, avoids default persistence of sensitive data, and matches the workflow of developers and security researchers investigating focused file-system behavior.
+This architecture minimizes system overhead, keeps privileged code small, avoids default persistence of private data, and matches the workflow of developers and security researchers investigating focused file-system behavior.

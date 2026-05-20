@@ -130,12 +130,6 @@ enum MacFSWSQLQueryCompiler {
         if query.mutationOnly {
             clauses.append(simple("mutation = ?", MacFSWSQLValue(1)))
         }
-        if query.sensitiveOnly {
-            clauses.append(simple("sensitive = ?", MacFSWSQLValue(1)))
-        }
-        if let minimumRisk = query.minimumRisk {
-            clauses.append(simple("riskScore >= ?", MacFSWSQLValue(minimumRisk.score)))
-        }
         if let processIdentity = query.processIdentity {
             clauses.append(processIdentityClause(processIdentity))
         }
@@ -218,8 +212,6 @@ enum MacFSWSQLQueryCompiler {
             return enumClause(columns: ["eventType", "rawEventType"], pattern: pattern)
         case .operationClass:
             return enumClause(columns: ["operationClass"], pattern: pattern)
-        case .risk:
-            return enumClause(columns: ["risk"], pattern: pattern)
         case .platformBinary:
             if let expected = pattern.queryBoolSQL {
                 return simple("isPlatformBinary = ?", MacFSWSQLValue(expected ? 1 : 0))
@@ -230,11 +222,6 @@ enum MacFSWSQLQueryCompiler {
                 return falseClause()
             }
             return simple("mutation = ?", MacFSWSQLValue(expected ? 1 : 0))
-        case .sensitive:
-            guard let expected = pattern.queryBoolSQL else {
-                return falseClause()
-            }
-            return simple("sensitive = ?", MacFSWSQLValue(expected ? 1 : 0))
         case .appleControlled:
             guard let expected = pattern.queryBoolSQL else {
                 return falseClause()
@@ -253,8 +240,6 @@ enum MacFSWSQLQueryCompiler {
         }
 
         switch field {
-        case .risk:
-            return enumEqualityClause(column: "risk", pattern: pattern)
         case .eventType:
             return or([
                 enumEqualityClause(column: "eventType", pattern: pattern),
@@ -274,11 +259,6 @@ enum MacFSWSQLQueryCompiler {
                 return falseClause()
             }
             return simple("mutation = ?", MacFSWSQLValue(expected ? 1 : 0))
-        case .sensitive:
-            guard let expected = pattern.queryBoolSQL else {
-                return falseClause()
-            }
-            return simple("sensitive = ?", MacFSWSQLValue(expected ? 1 : 0))
         case .appleControlled:
             guard let expected = pattern.queryBoolSQL else {
                 return falseClause()
@@ -304,13 +284,6 @@ enum MacFSWSQLQueryCompiler {
             return falseClause()
         }
 
-        if field == .risk {
-            guard let risk = MacFSWRiskLevel(rawValue: rawValue.lowercased()) else {
-                return falseClause()
-            }
-            return simple("riskScore \(op) ?", MacFSWSQLValue(risk.score))
-        }
-
         guard let number = rawValue.queryNumberSQL, let column = numericColumn(for: field) else {
             return falseClause()
         }
@@ -326,7 +299,7 @@ enum MacFSWSQLQueryCompiler {
 
     private static func enumEqualityClause(column: String, pattern: String) -> MacFSWCompiledSQL {
         switch column {
-        case "eventType", "operationClass", "risk":
+        case "eventType", "operationClass":
             return simple("\(column) = ?", MacFSWSQLValue(pattern.lowercased()))
         default:
             return simple("lower(\(column)) = lower(?)", MacFSWSQLValue(pattern))
@@ -351,16 +324,15 @@ enum MacFSWSQLQueryCompiler {
             sqlPattern = "%\(pattern.sqlLikeEscaped)%"
         }
 
-        let likeClause = or(columns.map { column in
+        if !pattern.containsWildcardSQL, !equalityOnly, let ftsColumn = ftsColumn(for: columns) {
+            return ftsClause(pattern: pattern, column: ftsColumn)
+        }
+        return or(columns.map { column in
             MacFSWCompiledSQL(
                 whereSQL: "lower(coalesce(\(column), '')) LIKE lower(?) ESCAPE '\\'",
                 arguments: [MacFSWSQLValue(sqlPattern)]
             )
         })
-        guard !pattern.containsWildcardSQL, !equalityOnly, let ftsColumn = ftsColumn(for: columns) else {
-            return likeClause
-        }
-        return or([ftsClause(pattern: pattern, column: ftsColumn), likeClause])
     }
 
     private static func processIdentityClause(_ identity: MacFSWProcessFilterIdentity) -> MacFSWCompiledSQL {
@@ -393,10 +365,6 @@ enum MacFSWSQLQueryCompiler {
             return ["teamID"]
         case .platformBinary:
             return ["isPlatformBinaryText"]
-        case .risk:
-            return ["risk"]
-        case .riskReasons:
-            return ["riskReasonsText"]
         case .uid:
             return ["uidText"]
         case .gid:
@@ -419,8 +387,6 @@ enum MacFSWSQLQueryCompiler {
             return ["parameterText", "detailSummary"]
         case .mutation:
             return ["mutationText"]
-        case .sensitive:
-            return ["sensitiveText"]
         case .appleControlled:
             return ["appleControlledText"]
         case .auditToken:
@@ -463,8 +429,6 @@ enum MacFSWSQLQueryCompiler {
             "signingID",
             "teamID",
             "isPlatformBinaryText",
-            "risk",
-            "riskReasonsText",
             "uidText",
             "gidText",
             "uidGidText",
@@ -496,8 +460,6 @@ enum MacFSWSQLQueryCompiler {
             return "signing_text"
         case Set(["teamID"]):
             return "team_text"
-        case Set(["riskReasonsText"]):
-            return "risk_reason_text"
         default:
             return nil
         }

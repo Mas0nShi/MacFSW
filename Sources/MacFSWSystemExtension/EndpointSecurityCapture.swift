@@ -281,7 +281,7 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
 
         let timestampNS = UInt64(message.pointee.time.tv_sec) * 1_000_000_000 + UInt64(message.pointee.time.tv_nsec)
         let parameters = eventParameters(message: message)
-        var event = MacFSWFileEvent(
+        let event = MacFSWFileEvent(
             timestampNS: timestampNS,
             eventType: eventType,
             process: process,
@@ -292,13 +292,10 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
             flags: paths.flags,
             uid: UInt32(audit_token_to_euid(message.pointee.process.pointee.audit_token)),
             gid: UInt32(audit_token_to_egid(message.pointee.process.pointee.audit_token)),
-            rawEventType: String(describing: message.pointee.event_type),
+            rawEventType: rawEventTypeName(message.pointee.event_type),
             rawEventTypeValue: UInt32(message.pointee.event_type.rawValue),
             rawEventVersion: message.pointee.version
         )
-        let risk = MacFSWRiskClassifier.classify(event)
-        event.risk = risk.0
-        event.riskReasons = risk.1
         return event
     }
 
@@ -532,6 +529,30 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         case ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR: .deleteextattr
         case ES_EVENT_TYPE_NOTIFY_UTIMES: .utimes
         default: .unknown
+        }
+    }
+
+    private func rawEventTypeName(_ eventType: es_event_type_t) -> String {
+        switch eventType {
+        case ES_EVENT_TYPE_NOTIFY_CREATE: "ES_EVENT_TYPE_NOTIFY_CREATE"
+        case ES_EVENT_TYPE_NOTIFY_OPEN: "ES_EVENT_TYPE_NOTIFY_OPEN"
+        case ES_EVENT_TYPE_NOTIFY_CLOSE: "ES_EVENT_TYPE_NOTIFY_CLOSE"
+        case ES_EVENT_TYPE_NOTIFY_WRITE: "ES_EVENT_TYPE_NOTIFY_WRITE"
+        case ES_EVENT_TYPE_NOTIFY_RENAME: "ES_EVENT_TYPE_NOTIFY_RENAME"
+        case ES_EVENT_TYPE_NOTIFY_UNLINK: "ES_EVENT_TYPE_NOTIFY_UNLINK"
+        case ES_EVENT_TYPE_NOTIFY_LINK: "ES_EVENT_TYPE_NOTIFY_LINK"
+        case ES_EVENT_TYPE_NOTIFY_CLONE: "ES_EVENT_TYPE_NOTIFY_CLONE"
+        case ES_EVENT_TYPE_NOTIFY_COPYFILE: "ES_EVENT_TYPE_NOTIFY_COPYFILE"
+        case ES_EVENT_TYPE_NOTIFY_TRUNCATE: "ES_EVENT_TYPE_NOTIFY_TRUNCATE"
+        case ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA: "ES_EVENT_TYPE_NOTIFY_EXCHANGEDATA"
+        case ES_EVENT_TYPE_NOTIFY_SETMODE: "ES_EVENT_TYPE_NOTIFY_SETMODE"
+        case ES_EVENT_TYPE_NOTIFY_SETOWNER: "ES_EVENT_TYPE_NOTIFY_SETOWNER"
+        case ES_EVENT_TYPE_NOTIFY_SETFLAGS: "ES_EVENT_TYPE_NOTIFY_SETFLAGS"
+        case ES_EVENT_TYPE_NOTIFY_SETACL: "ES_EVENT_TYPE_NOTIFY_SETACL"
+        case ES_EVENT_TYPE_NOTIFY_SETEXTATTR: "ES_EVENT_TYPE_NOTIFY_SETEXTATTR"
+        case ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR: "ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR"
+        case ES_EVENT_TYPE_NOTIFY_UTIMES: "ES_EVENT_TYPE_NOTIFY_UTIMES"
+        default: "ES_EVENT_TYPE_UNKNOWN_\(eventType.rawValue)"
         }
     }
 

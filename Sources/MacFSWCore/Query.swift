@@ -17,8 +17,6 @@ public struct MacFSWEventQuery: Codable, Equatable, Sendable {
     public var startTimeNS: UInt64?
     public var endTimeNS: UInt64?
     public var mutationOnly: Bool
-    public var sensitiveOnly: Bool
-    public var minimumRisk: MacFSWRiskLevel?
     public var limit: Int
     public var excludedTerms: [String]
     public var expression: MacFSWQueryExpression?
@@ -40,8 +38,6 @@ public struct MacFSWEventQuery: Codable, Equatable, Sendable {
         startTimeNS: UInt64? = nil,
         endTimeNS: UInt64? = nil,
         mutationOnly: Bool = false,
-        sensitiveOnly: Bool = false,
-        minimumRisk: MacFSWRiskLevel? = nil,
         limit: Int = 0,
         excludedTerms: [String] = [],
         expression: MacFSWQueryExpression? = nil
@@ -62,8 +58,6 @@ public struct MacFSWEventQuery: Codable, Equatable, Sendable {
         self.startTimeNS = startTimeNS
         self.endTimeNS = endTimeNS
         self.mutationOnly = mutationOnly
-        self.sensitiveOnly = sensitiveOnly
-        self.minimumRisk = minimumRisk
         self.limit = limit
         self.excludedTerms = excludedTerms
         self.expression = expression
@@ -99,12 +93,6 @@ public struct MacFSWEventQuery: Codable, Equatable, Sendable {
             return false
         }
         if mutationOnly, !event.eventType.isMutation {
-            return false
-        }
-        if sensitiveOnly, !MacFSWRiskClassifier.isSensitivePath(event.targetPath) {
-            return false
-        }
-        if let minimumRisk, event.risk < minimumRisk {
             return false
         }
         if !pids.isEmpty, !pids.contains(event.process.pid) {
@@ -209,11 +197,6 @@ public struct MacFSWQueryPredicate: Codable, Equatable, Sendable {
 
     private func valueMatches(_ pattern: String, event: MacFSWFileEvent, equalityOnly: Bool) -> Bool {
         switch field {
-        case .risk:
-            if pattern.containsWildcard {
-                return MacFSWQueryMatcher.matches(pattern, in: event.queryValues(for: field), equalityOnly: true)
-            }
-            return event.risk.rawValue.caseInsensitiveCompare(pattern) == .orderedSame
         case .eventType:
             return enumMatches(pattern, event.eventType.rawValue)
         case .operationClass:
@@ -228,11 +211,6 @@ public struct MacFSWQueryPredicate: Codable, Equatable, Sendable {
                 return false
             }
             return event.eventType.isMutation == expected
-        case .sensitive:
-            guard let expected = pattern.queryBool else {
-                return false
-            }
-            return MacFSWRiskClassifier.isSensitivePath(event.targetPath) == expected
         case .appleControlled:
             guard let expected = pattern.queryBool else {
                 return false
@@ -256,13 +234,6 @@ public struct MacFSWQueryPredicate: Codable, Equatable, Sendable {
     }
 
     private func numericValueMatches(_ rawValue: String, event: MacFSWFileEvent) -> Bool {
-        if field == .risk {
-            guard let expected = MacFSWRiskLevel(rawValue: rawValue.lowercased()) else {
-                return false
-            }
-            return compare(Double(event.risk.score), Double(expected.score))
-        }
-
         guard let expected = rawValue.queryNumber,
               let actual = event.queryNumber(for: field) else {
             return false
@@ -309,8 +280,6 @@ public enum MacFSWQueryField: String, Codable, CaseIterable, Sendable {
     case signingID
     case teamID
     case platformBinary
-    case risk
-    case riskReasons
     case uid
     case gid
     case uidGid
@@ -322,7 +291,6 @@ public enum MacFSWQueryField: String, Codable, CaseIterable, Sendable {
     case flags
     case parameters
     case mutation
-    case sensitive
     case appleControlled
     case auditToken
     case cdhash
@@ -651,10 +619,6 @@ private extension MacFSWQueryField {
             return .teamID
         case "platform", "platformbinary", "platform.binary", "process.platform":
             return .platformBinary
-        case "risk", "level":
-            return .risk
-        case "reason", "reasons", "riskreason", "riskreasons", "risk.reason", "risk.reasons":
-            return .riskReasons
         case "uid", "user", "userid", "user.id":
             return .uid
         case "gid", "group", "groupid", "group.id":
@@ -677,8 +641,6 @@ private extension MacFSWQueryField {
             return .parameters
         case "mutation", "mutating", "writeevent":
             return .mutation
-        case "sensitive", "sensitivepath":
-            return .sensitive
         case "apple", "applecontrolled", "apple.controlled":
             return .appleControlled
         case "audit", "audittoken", "audit.token":
@@ -705,8 +667,6 @@ private extension MacFSWFileEvent {
             process.teamID,
             process.isPlatformBinary ? "yes" : "no",
             process.isPlatformBinary ? "true" : "false",
-            risk.rawValue,
-            riskReasons.joined(separator: " "),
             String(uid),
             String(gid),
             "\(uid)/\(gid)",
@@ -750,10 +710,6 @@ private extension MacFSWFileEvent {
             return [process.teamID].compactMap { $0 }
         case .platformBinary:
             return process.isPlatformBinary.queryBoolValues
-        case .risk:
-            return [risk.rawValue]
-        case .riskReasons:
-            return riskReasons + [riskReasons.joined(separator: " ")]
         case .uid:
             return [String(uid)]
         case .gid:
@@ -776,8 +732,6 @@ private extension MacFSWFileEvent {
             return parameters.flatMap { [$0.key, $0.label, $0.value, $0.displayText] } + [operationDetailSummary]
         case .mutation:
             return eventType.isMutation.queryBoolValues
-        case .sensitive:
-            return MacFSWRiskClassifier.isSensitivePath(targetPath).queryBoolValues
         case .appleControlled:
             return process.isAppleControlled.queryBoolValues
         case .auditToken:

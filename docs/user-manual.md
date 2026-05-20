@@ -1,6 +1,6 @@
 # MacFSW User Manual
 
-Applies to MacFSW 0.1.5.
+Applies to the current MacFSW release.
 
 ## Quick Start
 
@@ -13,11 +13,11 @@ Use this path when you just need to capture and inspect one behavior:
 5. Click Record.
 6. Reproduce the behavior you are researching.
 7. Click Stop.
-8. Filter the event table with queries such as `process:installer`, `path:/Library`, or `risk>=medium`.
+8. Filter the event table with queries such as `process:installer`, `path:/Library`, or `rawtype:ES_EVENT_TYPE_NOTIFY_WRITE`.
 9. Select important rows and review the inspector.
 10. Save the session only if you want to keep the captured data.
 
-The Help window has a table of contents on the left. Select a topic there instead of scrolling through the entire manual.
+Use Help > MacFSW User Manual to open the current manual on GitHub.
 
 ## Contents
 
@@ -33,9 +33,9 @@ The Help window has a table of contents on the left. Select a topic there instea
 - 9. Process Sidebar
 - 10. Event Detail Inspector
 - 11. Query Syntax Reference
-- 12. Risk Labels
-- 13. Analysis Beta
-- 14. System Extension Settings
+- 12. Analysis Beta
+- 13. System Extension Settings
+- 14. Logs
 - 15. Privacy Model
 - 16. Troubleshooting
 - 17. Keyboard Shortcuts
@@ -304,14 +304,14 @@ op:rename OR op:unlink
 (op:chmod OR op:chown) path:/Library
 path:/Library/LaunchAgents NOT platform:true
 team:UYF* signing:com.mas0n.*
-sequence>=1000 risk>=medium
+sequence>=1000 path:/Library
 rawtype:ES_EVENT_TYPE_NOTIFY_WRITE
 rawtype:987654
 ```
 
 ### 8.2 Event Table
 
-The event table is optimized for scanning large event streams. Rows include operation, risk, process, PID, path, signing details, and related metadata.
+The event table is optimized for scanning large event streams. Rows include operation, process, PID, path, signing details, and related metadata.
 
 Select a row to open event details in the inspector.
 
@@ -350,7 +350,6 @@ Common sections include:
 
 - Summary
 - Path
-- Risk
 - Process
 - Identity
 - Raw Event
@@ -408,7 +407,6 @@ Path fields:
 path:/Library
 target:/Library/LaunchAgents/*
 source:/tmp/*
-sensitive:true
 ```
 
 Process fields:
@@ -428,14 +426,6 @@ Signing fields:
 signing:com.apple.*
 team:UYF*
 cdhash:abcdef*
-```
-
-Risk fields:
-
-```text
-risk:high
-risk>=medium
-reason:sensitive*
 ```
 
 Identity fields:
@@ -479,10 +469,10 @@ Find writes by a process family:
 process:installer path:/Library
 ```
 
-Find high-risk non-Apple activity:
+Find non-Apple activity in privileged paths:
 
 ```text
-risk:high apple:false
+path:/Library apple:false
 ```
 
 Find raw Endpoint Security write events by numeric raw value:
@@ -491,22 +481,7 @@ Find raw Endpoint Security write events by numeric raw value:
 rawtype:987654
 ```
 
-## 12. Risk Labels
-
-Risk labels are research hints, not vulnerability verdicts.
-
-MacFSW may elevate risk for patterns such as:
-
-- writes to LaunchAgents or LaunchDaemons
-- chmod, chown, or setacl operations
-- deletes or renames of sensitive paths
-- third-party processes touching privileged locations
-- writes to preference, cache, application support, or temporary directories
-- file replacement patterns involving rename or exchangedata
-
-Always inspect the event context before drawing conclusions.
-
-## 13. Analysis Beta
+## 12. Analysis Beta
 
 Analysis is marked Beta because its output depends on the selected model, provider behavior, configured limits, and the quality of captured event data.
 
@@ -515,13 +490,12 @@ Analysis sends a scoped summary of selected process activity to the configured L
 - process identity
 - operation counts
 - top paths
-- risk hints
 - recent event samples
 - raw event metadata when available
 
 API keys are stored in Keychain.
 
-### 13.1 Configure Analysis
+### 12.1 Configure Analysis
 
 Open:
 
@@ -542,7 +516,7 @@ Configure:
 
 Use Test Connection before running analysis.
 
-### 13.2 Run Analysis
+### 12.2 Run Analysis
 
 1. Switch to Analysis Beta.
 2. Select a process in the process sidebar.
@@ -550,13 +524,13 @@ Use Test Connection before running analysis.
 4. Review the streaming Markdown report.
 5. Select completed reports from the report history.
 
-### 13.3 Limits and Privacy
+### 12.3 Limits and Privacy
 
-Analysis can send event summaries and path data to the configured provider. Review provider terms and local policy before sending sensitive captures.
+Analysis can send event summaries and path data to the configured provider. Review provider terms and local policy before sending private captures.
 
-Use lower Max Events and Token Budget settings when working with sensitive or very large sessions.
+Use lower Max Events and Token Budget settings when working with private or very large sessions.
 
-## 14. System Extension Settings
+## 13. System Extension Settings
 
 Open:
 
@@ -583,9 +557,27 @@ terminated waiting to uninstall on reboot
 
 This is expected after replacement. Reboot to let macOS finish cleanup.
 
+## 14. Logs
+
+Open:
+
+```text
+Settings > Logs
+```
+
+MacFSW writes local diagnostic logs to:
+
+```text
+~/Library/Logs/MacFSW/MacFSW.log
+```
+
+The Logs settings pane controls whether diagnostic logs are written, the minimum log level, and actions to open the logs folder, copy the log path, or clear the log file.
+
+Capture, System Extension, SQLite, and analysis errors are written with full error details so status bar truncation does not hide the actionable failure.
+
 ## 15. Privacy Model
 
-MacFSW captures sensitive local information:
+MacFSW captures private local information:
 
 - file paths
 - process names
@@ -593,7 +585,7 @@ MacFSW captures sensitive local information:
 - signing identifiers
 - user and group IDs
 - behavior timing
-- potentially sensitive filenames
+- potentially private filenames
 
 MacFSW does not intentionally run hidden background capture. Recording is explicit.
 
@@ -603,7 +595,7 @@ Analysis Beta may send selected event summaries to your configured LLM provider.
 
 ## 16. Troubleshooting
 
-### 16.1 Record Shows Enable Extension
+### 15.1 Record Shows Enable Extension
 
 The System Extension is missing, disabled, outdated, or not approved.
 
@@ -619,7 +611,7 @@ Then approve it in:
 System Settings > General > Login Items & Extensions
 ```
 
-### 16.2 Record Shows Open Full Disk Access
+### 15.2 Record Shows Open Full Disk Access
 
 The System Extension is installed, but macOS denied Endpoint Security client creation.
 
@@ -637,13 +629,13 @@ MacFSW Endpoint Extension
 
 Then return to MacFSW and click Check Again.
 
-### 16.3 Endpoint Security Error Includes rawValue 4
+### 15.3 Endpoint Security Error Includes rawValue 4
 
 `ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED` with `rawValue: 4` means the System Extension does not have the required Endpoint Security / Full Disk Access authorization.
 
 Grant permission to `MacFSW Endpoint Extension`, not only to `MacFSW.app`.
 
-### 16.4 Extension Is Activated but Capture Still Fails
+### 15.4 Extension Is Activated but Capture Still Fails
 
 Try these steps:
 
@@ -655,7 +647,7 @@ Try these steps:
 6. Confirm Full Disk Access for `MacFSW Endpoint Extension`.
 7. Reboot if old extension versions are waiting to uninstall.
 
-### 16.5 No Events Appear
+### 15.5 No Events Appear
 
 Check:
 
@@ -666,7 +658,7 @@ Check:
 - excluded paths or excluded process names are not hiding the events
 - the capture profile includes the event type you expect
 
-### 16.6 Too Many Events Appear
+### 15.6 Too Many Events Appear
 
 Use:
 
@@ -679,7 +671,7 @@ Use:
 
 Avoid verbose read capture unless you specifically need open and close events.
 
-### 16.7 Analysis Fails
+### 15.7 Analysis Fails
 
 Check:
 
@@ -700,7 +692,7 @@ Common shortcuts:
 Command-N            New Session
 Command-O            Open Session
 Command-S            Save Session
-Command-Shift-/      Open MacFSW User Manual
+Command-Shift-/      Open MacFSW User Manual on GitHub
 ```
 
 macOS may display `Command-Shift-/` as `Command-?`.
@@ -714,7 +706,7 @@ System Extension:
 A separately approved macOS extension bundle that runs outside the host app and owns Endpoint Security capture.
 
 Full Disk Access:
-A macOS privacy permission required for some security-sensitive system capabilities. For MacFSW capture, grant it to `MacFSW Endpoint Extension`.
+A macOS privacy permission required for some protected system capabilities. For MacFSW capture, grant it to `MacFSW Endpoint Extension`.
 
 Session:
 The current research workspace containing capture settings, events, filters, and analysis results.

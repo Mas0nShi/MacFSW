@@ -5,10 +5,41 @@
 MacFSW is intentionally Swift-only:
 
 - `MacFSWCore` contains product models, query logic, in-memory storage, archive support, XPC payloads, and capture client abstractions.
-- `MacFSWApp` owns Session UX, event analysis, and save/open workflows.
+- `MacFSWApp` owns Session UX, event analysis, save/open workflows, and all App-layer orchestration.
 - `MacFSWSystemExtension` owns Endpoint Security capture and XPC event streaming only.
 
 The System Extension must remain a minimal sensor. It should not persist data, manage Sessions, or implement product search.
+
+## App Target Structure
+
+`MacFSWApp` is organized as a staged MVVM/Coordinator app:
+
+```text
+Sources/MacFSWApp/
+  App/          App entry, AppDelegate, dependency environment, Coordinator
+  Stores/       Feature state, task ownership, persistence adapters
+  Views/        SwiftUI view surfaces grouped by feature
+  Components/   Reusable view components
+  Models/       App presentation models
+  Support/      Pure helpers and reducers
+```
+
+`MacFSWApp.swift` is intentionally small. It wires the scenes, commands, Settings, and external Help links only.
+
+`MacFSWAppCoordinator` composes feature stores and handles cross-feature actions, such as replacing a session, routing a process selection to Monitor or Analysis, and syncing capture failures with System Extension status.
+
+Feature stores own the state and asynchronous task handles for their domain:
+
+- `AppPreferencesStore`: default page, default process visibility, LLM settings persistence
+- `SessionStore`: current research session and SQLite event store lifecycle
+- `CaptureStore`: capture client, capture stream handle, capture state, health, and stats
+- `SystemExtensionStatusStore`: activation state, Login Items and Full Disk Access shortcuts
+- `MonitorStore`: query, snapshots, selection, live/frozen state, row cache, row loading tasks
+- `ProcessSidebarStore`: process summary index, filtering, grouping, include-exited state
+- `AnalysisStore`: selected analysis target, LLM stream task, connection test, report history
+- `AppLogStore`: local diagnostic log settings and serialized writes to `~/Library/Logs/MacFSW/MacFSW.log`
+
+Views should render state and forward user intent. They should not directly start XPC streams, open SQLite stores, touch Keychain, call LLM providers, or open System Settings. Those side effects belong in stores or the Coordinator.
 
 ## Development Backend
 
@@ -59,6 +90,15 @@ A production app bundle should still be archived from an Xcode project with:
 - system extension entitlements
 - provisioning profiles that include the required restricted ES entitlement
 
+Version metadata has a single source of truth in `Configuration/Signing.xcconfig`:
+
+```text
+MARKETING_VERSION = 0.1.6
+CURRENT_PROJECT_VERSION = 9
+```
+
+Those are the standard Xcode build setting names for `CFBundleShortVersionString` and `CFBundleVersion`. App code must read the installed bundle metadata through `Bundle.main` when it needs the product version, for example when creating session metadata. Core libraries must not hardcode the App version.
+
 ## System Extension Onboarding
 
 The app does not assume the System Extension is installed. On launch it checks XPC health. If the capture service is not reachable, the sidebar shows a System Extension onboarding card and the toolbar action changes from `Record` to `Enable Extension`.
@@ -90,6 +130,17 @@ Capture is bound to XPC stream lifetime:
 - XPC interruption, invalidation, or explicit stop ends ES capture.
 
 No heartbeat is required in v1 if this lifetime contract is kept strict.
+
+## Event Store Performance
+
+The App uses SQLite as the active session event store. Monitor filtering must avoid work proportional to every matching row whenever possible:
+
+- Result snapshots are lightweight in-memory query descriptors, not materialized `result_rows` tables.
+- The event table loads only the requested row windows from SQLite.
+- FTS-backed text fields use FTS directly for normal text queries; wildcard and non-FTS fields fall back to `LIKE`.
+- Operation summaries are refreshed after the table's initial rows are committed so large `GROUP BY` work does not block first paint.
+
+This keeps broad filters usable on sessions with hundreds of thousands of events. Deep random scrolling can still hit SQLite `OFFSET` costs; keyset/cursor pagination is the next optimization if that becomes the dominant bottleneck.
 
 ## XPC Trust Boundary
 

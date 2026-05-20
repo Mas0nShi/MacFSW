@@ -6,7 +6,6 @@ public struct MacFSWEventRowSummary: Identifiable, Codable, Equatable, Hashable,
     public var timestampNS: UInt64
     public var eventType: MacFSWEventType
     public var operationClass: MacFSWOperationClass
-    public var risk: MacFSWRiskLevel
     public var processName: String
     public var pid: Int32
     public var targetPath: String
@@ -20,7 +19,6 @@ public struct MacFSWEventRowSummary: Identifiable, Codable, Equatable, Hashable,
         timestampNS: UInt64,
         eventType: MacFSWEventType,
         operationClass: MacFSWOperationClass,
-        risk: MacFSWRiskLevel,
         processName: String,
         pid: Int32,
         targetPath: String,
@@ -33,7 +31,6 @@ public struct MacFSWEventRowSummary: Identifiable, Codable, Equatable, Hashable,
         self.timestampNS = timestampNS
         self.eventType = eventType
         self.operationClass = operationClass
-        self.risk = risk
         self.processName = processName
         self.pid = pid
         self.targetPath = targetPath
@@ -49,7 +46,6 @@ public struct MacFSWEventRowSummary: Identifiable, Codable, Equatable, Hashable,
             timestampNS: event.timestampNS,
             eventType: event.eventType,
             operationClass: event.operationClass,
-            risk: event.risk,
             processName: event.process.processName,
             pid: event.process.pid,
             targetPath: event.targetPath,

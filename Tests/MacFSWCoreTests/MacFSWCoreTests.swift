@@ -3,9 +3,9 @@ import XCTest
 
 final class MacFSWCoreTests: XCTestCase {
     func testQueryParserBuildsStructuredFilters() {
-        let query = MacFSWQueryParser.parse("process:cfprefsd op:write path:/Library apple:false risk:high")
+        let query = MacFSWQueryParser.parse("process:cfprefsd op:write path:/Library apple:false")
 
-        XCTAssertEqual(query.text, "process:cfprefsd op:write path:/Library apple:false risk:high")
+        XCTAssertEqual(query.text, "process:cfprefsd op:write path:/Library apple:false")
         XCTAssertNotNil(query.expression)
     }
 
@@ -108,23 +108,19 @@ final class MacFSWCoreTests: XCTestCase {
             executablePath: "/usr/libexec/tester",
             processName: "tester"
         )
-        var event = MacFSWFileEvent(
+        let event = MacFSWFileEvent(
             eventType: .write,
             process: process,
             targetPath: "/Library/LaunchAgents/com.example.agent.plist",
             uid: 501,
             gid: 20
         )
-        let risk = MacFSWRiskClassifier.classify(event)
-        event.risk = risk.0
-        event.riskReasons = risk.1
 
         _ = await store.append([event])
-        let results = await store.query(MacFSWQueryParser.parse("process:tester path:LaunchAgents risk:high"))
+        let results = await store.query(MacFSWQueryParser.parse("process:tester path:LaunchAgents"))
 
         XCTAssertEqual(results.count, 1)
         XCTAssertEqual(results.first?.eventType, .write)
-        XCTAssertEqual(results.first?.risk, .high)
     }
 
     func testSQLiteSessionArchiveRoundTrips() async throws {
@@ -139,10 +135,7 @@ final class MacFSWCoreTests: XCTestCase {
             executablePath: "/bin/sh",
             processName: "sh"
         )
-        let session = MacFSWResearchSession(
-            name: "Archive Test",
-            markers: [MacFSWMarker(title: "trigger")]
-        )
+        let session = MacFSWResearchSession(name: "Archive Test")
         let store = try MacFSWSQLiteEventStore.temporary(session: session)
         let appended = try await store.appendReturningEvents([
             MacFSWFileEvent(eventType: .rename, process: process, targetPath: "/tmp/a", sourcePath: "/tmp/b")
@@ -156,7 +149,6 @@ final class MacFSWCoreTests: XCTestCase {
         let opened = try await openedStore.sessionMetadata()
 
         XCTAssertEqual(opened.name, "Archive Test")
-        XCTAssertEqual(opened.markers.count, 1)
         let openedCount = try await openedStore.count(matching: MacFSWEventQuery())
         XCTAssertEqual(openedCount, 1)
 
@@ -173,6 +165,47 @@ final class MacFSWCoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
     }
 
+    func testSQLiteConcurrentStoreInstancesAssignDatabaseBackedSequences() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macfsw-concurrent-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("session.sqlite")
+        let storeA = try MacFSWSQLiteEventStore(url: url)
+        let storeB = try MacFSWSQLiteEventStore(url: url)
+        let process = MacFSWProcessIdentity(
+            pid: 71,
+            auditToken: "concurrent",
+            executablePath: "/usr/bin/tester",
+            processName: "tester"
+        )
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for batch in 0..<10 {
+                group.addTask {
+                    let store = batch.isMultiple(of: 2) ? storeA : storeB
+                    let events = (0..<10).map { index in
+                        MacFSWFileEvent(
+                            eventType: .write,
+                            process: process,
+                            targetPath: "/tmp/concurrent-\(batch)-\(index)"
+                        )
+                    }
+                    _ = try await store.appendReturningEvents(events)
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        let events = try await storeA.snapshot()
+        let sequences = events.map(\.sequence).sorted()
+
+        XCTAssertEqual(events.count, 100)
+        XCTAssertEqual(Set(sequences).count, 100)
+        XCTAssertEqual(sequences, (1...100).map(UInt64.init))
+    }
+
     func testSQLiteStoreFiltersAndPagesRows() async throws {
         let process = MacFSWProcessIdentity(
             pid: 99,
@@ -184,9 +217,9 @@ final class MacFSWCoreTests: XCTestCase {
         )
         let store = try MacFSWSQLiteEventStore.temporary()
         _ = try await store.appendReturningEvents([
-            MacFSWFileEvent(eventType: .write, risk: .low, process: process, targetPath: "/tmp/a"),
-            MacFSWFileEvent(eventType: .unlink, risk: .high, process: process, targetPath: "/Library/LaunchAgents/a.plist"),
-            MacFSWFileEvent(eventType: .rename, risk: .medium, process: process, targetPath: "/tmp/c", sourcePath: "/tmp/b"),
+            MacFSWFileEvent(eventType: .write, process: process, targetPath: "/tmp/a"),
+            MacFSWFileEvent(eventType: .unlink, process: process, targetPath: "/Library/LaunchAgents/a.plist"),
+            MacFSWFileEvent(eventType: .rename, process: process, targetPath: "/tmp/c", sourcePath: "/tmp/b"),
         ])
 
         let query = MacFSWQueryParser.parse("(op:unlink OR op:rename) process:Example")
@@ -337,6 +370,20 @@ final class MacFSWCoreTests: XCTestCase {
         XCTAssertFalse(eventTypeSQL.contains("lower(eventType)"))
     }
 
+    func testIndexedTextQueryUsesFTSWithoutLikeFallback() {
+        let pathSQL = MacFSWSQLQueryCompiler
+            .compile(MacFSWQueryParser.parse("path:/Library"))
+            .whereSQL
+        let parameterSQL = MacFSWSQLQueryCompiler
+            .compile(MacFSWQueryParser.parse("detail:0644"))
+            .whereSQL
+
+        XCTAssertTrue(pathSQL.contains("event_fts"))
+        XCTAssertTrue(pathSQL.contains("MATCH"))
+        XCTAssertFalse(pathSQL.contains("LIKE"))
+        XCTAssertTrue(parameterSQL.contains("LIKE"))
+    }
+
     func testSQLiteProcessIdentityFilterUsesPIDAcrossAuditTokens() async throws {
         let reusedPID: Int32 = 4242
         let firstProcess = MacFSWProcessIdentity(
@@ -393,7 +440,7 @@ final class MacFSWCoreTests: XCTestCase {
         XCTAssertEqual(rows.map(\.targetPath), ["/tmp/first", "/tmp/second"])
     }
 
-    func testSQLiteResultSnapshotPagesWithoutOffsetQueries() async throws {
+    func testSQLiteResultSnapshotPagesVirtualSnapshot() async throws {
         let process = MacFSWProcessIdentity(
             pid: 88,
             auditToken: "snapshot",

@@ -106,7 +106,7 @@ public enum MacFSWAnalysisPayloadBuilder {
         let systemPrompt = """
         You are analyzing macOS Endpoint Security file-system event logs for a security researcher.
         Produce a concise Markdown report grounded only in the supplied event data.
-        Do not invent facts, risk scores, permissions, entitlement state, or user intent.
+        Do not invent facts, severity scores, permissions, entitlement state, or user intent.
         Prefer concrete supporting details: operation names, paths, process identity, uid/gid, signing, raw event type, and captured operation parameters.
         Call out uncertainty explicitly when the log does not contain enough data.
         """

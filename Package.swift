@@ -89,6 +89,10 @@ let package = Package(
             dependencies: ["MacFSWAnalysis"]
         ),
         .testTarget(
+            name: "MacFSWAppTests",
+            dependencies: ["MacFSWApp"]
+        ),
+        .testTarget(
             name: "MacFSWSystemExtensionTests",
             dependencies: ["MacFSWSystemExtension"]
         ),

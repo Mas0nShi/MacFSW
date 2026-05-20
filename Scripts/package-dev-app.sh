@@ -25,6 +25,8 @@ read_xcconfig_value() {
 }
 
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-$(read_xcconfig_value DEVELOPMENT_TEAM)}"
+MARKETING_VERSION="${MARKETING_VERSION:-$(read_xcconfig_value MARKETING_VERSION)}"
+BUILD_VERSION="${CURRENT_PROJECT_VERSION:-$(read_xcconfig_value CURRENT_PROJECT_VERSION)}"
 HOST_BUNDLE_ID="${MACFSW_HOST_BUNDLE_ID:-$(read_xcconfig_value MACFSW_HOST_BUNDLE_ID)}"
 EXTENSION_BUNDLE_ID="${MACFSW_EXTENSION_BUNDLE_ID:-$(read_xcconfig_value MACFSW_EXTENSION_BUNDLE_ID)}"
 XPC_SERVICE_NAME="${MACFSW_XPC_SERVICE_NAME:-$(read_xcconfig_value MACFSW_XPC_SERVICE_NAME)}"
@@ -52,20 +54,21 @@ mkdir -p "$EXT_BUNDLE/Contents/MacOS"
 cp "$BIN_DIR/$APP_EXECUTABLE" "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
 cp "$BIN_DIR/$EXT_EXECUTABLE" "$EXT_BUNDLE/Contents/MacOS/$EXT_EXECUTABLE"
 cp "$APP_ICON" "$APP_BUNDLE/Contents/Resources/MacFSW-AppIcon.icns"
-cp "$ROOT/docs/user-manual.md" "$APP_BUNDLE/Contents/Resources/MacFSW-User-Manual.md"
 
-render_plist() {
+render_template() {
   local source="$1"
   local destination="$2"
   sed \
+    -e 's|$(MARKETING_VERSION)|'"$MARKETING_VERSION"'|g' \
+    -e 's|$(CURRENT_PROJECT_VERSION)|'"$BUILD_VERSION"'|g' \
     -e 's|$(MACFSW_HOST_BUNDLE_ID)|'"$HOST_BUNDLE_ID"'|g' \
     -e 's|$(MACFSW_EXTENSION_BUNDLE_ID)|'"$EXTENSION_BUNDLE_ID"'|g' \
     -e 's|$(MACFSW_XPC_SERVICE_NAME)|'"$XPC_SERVICE_NAME"'|g' \
     "$source" > "$destination"
 }
 
-render_plist "$CONFIG_DIR/MacFSWApp-Info.plist" "$APP_BUNDLE/Contents/Info.plist"
-render_plist "$CONFIG_DIR/MacFSWSystemExtension-Info.plist" "$EXT_BUNDLE/Contents/Info.plist"
+render_template "$CONFIG_DIR/MacFSWApp-Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+render_template "$CONFIG_DIR/MacFSWSystemExtension-Info.plist" "$EXT_BUNDLE/Contents/Info.plist"
 
 profile_matches() {
   local profile="$1"

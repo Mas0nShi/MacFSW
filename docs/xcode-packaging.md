@@ -84,10 +84,14 @@ Baseline values:
 
 ```text
 DEVELOPMENT_TEAM = UYF535Y9QZ
+MARKETING_VERSION = 0.1.6
+CURRENT_PROJECT_VERSION = 9
 MACFSW_HOST_BUNDLE_ID = com.mas0n.MacFSW
 MACFSW_EXTENSION_BUNDLE_ID = com.mas0n.MacFSW.EndpointExtension
 MACFSW_XPC_SERVICE_NAME = UYF535Y9QZ.com.mas0n.MacFSW.EndpointExtension.xpc
 ```
+
+`MARKETING_VERSION` is the user-facing release version and maps to `CFBundleShortVersionString`. `CURRENT_PROJECT_VERSION` is the monotonically increasing build number and maps to `CFBundleVersion`. Do not add a second Swift constant for the product version; runtime code should read the bundled Info.plist through `Bundle.main`.
 
 Host app:
 
