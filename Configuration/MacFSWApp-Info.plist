@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>$(MACFSW_HOST_BUNDLE_ID)</string>
+	<key>CFBundleExecutable</key>
+	<string>MacFSWApp</string>
+	<key>CFBundleName</key>
+	<string>MacFSW</string>
+	<key>CFBundleDisplayName</key>
+	<string>MacFSW</string>
+	<key>CFBundleIconFile</key>
+	<string>MacFSW-AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.5</string>
+	<key>CFBundleVersion</key>
+	<string>6</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>MacFSWSystemExtensionBundleIdentifier</key>
+	<string>$(MACFSW_EXTENSION_BUNDLE_ID)</string>
+	<key>MacFSWXPCServiceName</key>
+	<string>$(MACFSW_XPC_SERVICE_NAME)</string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>MacFSW installs an Endpoint Security system extension to observe file-system operations during user-controlled security research sessions.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© Mas0n(@Mas0nShi) 2026</string>
+</dict>
+</plist>
