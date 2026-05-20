@@ -137,13 +137,7 @@ jobs:
           VERSION="$(printf '%s' "$VERSION" | tr '/[:space:]' '-' | tr -cd 'A-Za-z0-9._-')"
           DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
 
-          rm -f "$DMG_PATH"
-          hdiutil create \
-            -volname "$APP_NAME" \
-            -srcfolder "$APP_PATH" \
-            -ov \
-            -format UDZO \
-            "$DMG_PATH"
+          Scripts/create-release-dmg.sh "$APP_PATH" "$DMG_PATH"
 
           SIGNING_IDENTITY="$MACOS_CODESIGN_IDENTITY"
           if [[ -z "$SIGNING_IDENTITY" ]]; then

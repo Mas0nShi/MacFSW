@@ -56,6 +56,8 @@ For production distribution, create an Xcode project/archive because Endpoint Se
 
 For the GitHub Actions path that signs, notarizes, staples, and uploads the current SwiftPM-packaged artifact, see `docs/github-actions-signing.md`.
 
+Release DMGs are assembled with `Scripts/create-release-dmg.sh`, which adds an `Applications` shortcut and Finder background guidance. This is intentional: MacFSW must be copied to `/Applications` before launch so macOS can activate the bundled System Extension normally.
+
 ## Required Targets
 
 Create an Xcode project with these targets:
