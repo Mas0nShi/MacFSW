@@ -15,6 +15,8 @@ The workflow lives at `.github/workflows/macos-signed-release.yml` and runs on:
 - manual `workflow_dispatch`
 - pushed tags matching `v*`
 
+The workflow caches SwiftPM dependency and build output directories. Tests run with the same release configuration used by packaging, so the signed app build can reuse more of the compiled module output instead of compiling debug and release variants in one job.
+
 ## GitHub Secrets
 
 Add these under `Settings` -> `Secrets and variables` -> `Actions` -> `Secrets`.

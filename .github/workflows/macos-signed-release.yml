@@ -35,8 +35,19 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-${{ runner.arch }}-swiftpm-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**/*.swift', 'Tests/**/*.swift', 'Configuration/**', 'Scripts/package-dev-app.sh', 'Scripts/create-release-dmg.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-swiftpm-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+            ${{ runner.os }}-${{ runner.arch }}-swiftpm-
+
       - name: Test
-        run: swift test --disable-sandbox
+        run: swift test --disable-sandbox --configuration "$CONFIGURATION"
 
       - name: Import signing certificate
         env:
