@@ -85,37 +85,139 @@ profile_matches() {
   local bundle_id="$2"
   local required_entitlement="$3"
 
-  strings "$profile" \
-    | grep -Fq "<string>$DEVELOPMENT_TEAM.$bundle_id</string>" \
+  profile_matches_app_identifier "$profile" "$bundle_id" \
     && strings "$profile" \
     | grep -Fq "<key>$required_entitlement</key>"
+}
+
+profile_matches_app_identifier() {
+  local profile="$1"
+  local bundle_id="$2"
+
+  strings "$profile" \
+    | grep -Fq "<string>$DEVELOPMENT_TEAM.$bundle_id</string>"
+}
+
+decode_provisioning_profile() {
+  local profile="$1"
+  local destination="$2"
+
+  security cms -D -i "$profile" -o "$destination" >/dev/null 2>&1 \
+    || openssl cms -inform DER -verify -noverify -in "$profile" -out "$destination" >/dev/null 2>&1
+}
+
+profile_allows_endpoint_security_developer_id() {
+  local profile="$1"
+  local temp_dir profile_plist provisions_all_devices
+
+  temp_dir="$(mktemp -d)"
+  profile_plist="$temp_dir/profile.plist"
+
+  if ! decode_provisioning_profile "$profile" "$profile_plist"; then
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  provisions_all_devices="$(/usr/libexec/PlistBuddy -c "Print :ProvisionsAllDevices" "$profile_plist" 2>/dev/null || true)"
+  rm -rf "$temp_dir"
+
+  [[ "$provisions_all_devices" == "true" ]]
+}
+
+profile_authorizes_required_entitlement() {
+  local profile="$1"
+  local bundle_id="$2"
+  local required_entitlement="$3"
+
+  profile_matches "$profile" "$bundle_id" "$required_entitlement" \
+    || {
+      [[ "$required_entitlement" == "com.apple.developer.endpoint-security.client" ]] \
+        && profile_matches_app_identifier "$profile" "$bundle_id" \
+        && profile_allows_endpoint_security_developer_id "$profile"
+    }
+}
+
+profile_authorizes_identity() {
+  local profile="$1"
+  local identity_hash="$2"
+  local temp_dir profile_plist certs_xml certs_b64 cert_file cert_hash
+  local identity_hash_upper
+
+  identity_hash_upper="$(printf '%s' "$identity_hash" | tr '[:lower:]' '[:upper:]')"
+  temp_dir="$(mktemp -d)"
+  profile_plist="$temp_dir/profile.plist"
+  certs_xml="$temp_dir/certificates.xml"
+  certs_b64="$temp_dir/certificates.b64"
+  cert_file="$temp_dir/certificate.der"
+
+  if ! decode_provisioning_profile "$profile" "$profile_plist"; then
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  if ! /usr/libexec/PlistBuddy -x -c "Print :DeveloperCertificates" "$profile_plist" > "$certs_xml" 2>/dev/null; then
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  awk '
+    /<data>/ { in_data = 1; next }
+    /<\/data>/ { in_data = 0; print ""; next }
+    in_data {
+      gsub(/[[:space:]]/, "")
+      printf "%s", $0
+    }
+  ' "$certs_xml" > "$certs_b64"
+
+  while IFS= read -r certificate_base64; do
+    [[ -n "$certificate_base64" ]] || continue
+
+    if ! printf '%s' "$certificate_base64" | base64 --decode > "$cert_file" 2>/dev/null; then
+      printf '%s' "$certificate_base64" | base64 -D > "$cert_file"
+    fi
+
+    cert_hash="$(shasum -a 1 "$cert_file" | awk '{ print toupper($1) }')"
+    if [[ "$cert_hash" == "$identity_hash_upper" ]]; then
+      rm -rf "$temp_dir"
+      return 0
+    fi
+  done < "$certs_b64"
+
+  rm -rf "$temp_dir"
+  return 1
+}
+
+profile_name() {
+  local profile="$1"
+  local temp_dir profile_plist name
+
+  temp_dir="$(mktemp -d)"
+  profile_plist="$temp_dir/profile.plist"
+
+  if decode_provisioning_profile "$profile" "$profile_plist"; then
+    name="$(/usr/libexec/PlistBuddy -c "Print :Name" "$profile_plist" 2>/dev/null || true)"
+  fi
+
+  rm -rf "$temp_dir"
+  printf '%s\n' "${name:-$profile}"
 }
 
 find_provisioning_profile() {
   local bundle_id="$1"
   local required_entitlement="$2"
+  local identity_hash="${3:-}"
   local profile
 
   [[ -d "$PROVISIONING_PROFILE_DIR" ]] || return 0
 
   while IFS= read -r -d '' profile; do
-    if profile_matches "$profile" "$bundle_id" "$required_entitlement"; then
+    if profile_authorizes_required_entitlement "$profile" "$bundle_id" "$required_entitlement" \
+      && { [[ -z "$identity_hash" ]] || profile_authorizes_identity "$profile" "$identity_hash"; }; then
       printf '%s\n' "$profile"
       return 0
     fi
   done < <(find "$PROVISIONING_PROFILE_DIR" -maxdepth 1 -type f \( -name "*.provisionprofile" -o -name "*.mobileprovision" \) -print0)
 }
-
-HOST_PROVISIONING_PROFILE="${MACFSW_HOST_PROVISIONING_PROFILE:-$(find_provisioning_profile "$HOST_BUNDLE_ID" "com.apple.developer.system-extension.install")}"
-EXTENSION_PROVISIONING_PROFILE="${MACFSW_EXTENSION_PROVISIONING_PROFILE:-$(find_provisioning_profile "$EXTENSION_BUNDLE_ID" "com.apple.developer.endpoint-security.client")}"
-
-if [[ -n "$HOST_PROVISIONING_PROFILE" ]]; then
-  cp "$HOST_PROVISIONING_PROFILE" "$APP_BUNDLE/Contents/embedded.provisionprofile"
-fi
-
-if [[ -n "$EXTENSION_PROVISIONING_PROFILE" ]]; then
-  cp "$EXTENSION_PROVISIONING_PROFILE" "$EXT_BUNDLE/Contents/embedded.provisionprofile"
-fi
 
 certificate_matches_team() {
   local identity_hash="$1"
@@ -153,6 +255,64 @@ find_identity() {
   done < <(security find-identity -v -p codesigning 2>/dev/null)
 }
 
+identity_hash_for_signing_identity() {
+  local signing_identity="$1"
+  local line identity_hash identity_name
+  local signing_identity_upper
+
+  signing_identity_upper="$(printf '%s' "$signing_identity" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$signing_identity_upper" =~ ^[0-9A-F]{40}$ ]]; then
+    printf '%s\n' "$signing_identity_upper"
+    return 0
+  fi
+
+  while IFS= read -r line; do
+    identity_hash="$(printf '%s\n' "$line" | awk '{print $2}')"
+    identity_name="$(printf '%s\n' "$line" | sed -n 's/.*"\(.*\)".*/\1/p')"
+    [[ -n "$identity_hash" && -n "$identity_name" ]] || continue
+
+    if [[ "$identity_name" == "$signing_identity" ]] || [[ "$line" == *"$signing_identity"* ]]; then
+      printf '%s\n' "$identity_hash"
+      return 0
+    fi
+  done < <(security find-identity -v -p codesigning 2>/dev/null)
+}
+
+validate_provisioning_profile() {
+  local profile="$1"
+  local bundle_id="$2"
+  local required_entitlement="$3"
+  local identity_hash="$4"
+  local bundle_label="$5"
+  local profile_display_name
+
+  if ! profile_authorizes_required_entitlement "$profile" "$bundle_id" "$required_entitlement"; then
+    cat >&2 <<EOF
+Provisioning profile does not authorize the required $bundle_label entitlement.
+
+Profile: $profile
+Expected app identifier: $DEVELOPMENT_TEAM.$bundle_id
+Expected entitlement: $required_entitlement
+EOF
+    exit 7
+  fi
+
+  if ! profile_authorizes_identity "$profile" "$identity_hash"; then
+    profile_display_name="$(profile_name "$profile")"
+    cat >&2 <<EOF
+Provisioning profile certificate mismatch for $bundle_label.
+
+Profile: $profile_display_name
+Path: $profile
+
+The profile does not authorize the signing identity selected for this build.
+Create or download a provisioning profile for $bundle_id that includes the same
+certificate used by CODE_SIGN_IDENTITY.
+EOF
+    exit 8
+  fi
+}
+
 if [[ "$CODE_SIGN" == "1" ]]; then
   IDENTITY="${CODE_SIGN_IDENTITY:-$(find_identity)}"
   if [[ -z "$IDENTITY" ]]; then
@@ -173,6 +333,23 @@ EOF
     exit 2
   fi
 
+  IDENTITY_HASH="$(identity_hash_for_signing_identity "$IDENTITY")"
+  if [[ -z "$IDENTITY_HASH" ]]; then
+    cat >&2 <<EOF
+Could not resolve the selected signing identity to a certificate hash.
+
+Signing identity:
+$IDENTITY
+
+Available code signing identities:
+$(security find-identity -v -p codesigning 2>/dev/null || true)
+EOF
+    exit 2
+  fi
+
+  HOST_PROVISIONING_PROFILE="${MACFSW_HOST_PROVISIONING_PROFILE:-$(find_provisioning_profile "$HOST_BUNDLE_ID" "com.apple.developer.system-extension.install" "$IDENTITY_HASH")}"
+  EXTENSION_PROVISIONING_PROFILE="${MACFSW_EXTENSION_PROVISIONING_PROFILE:-$(find_provisioning_profile "$EXTENSION_BUNDLE_ID" "com.apple.developer.endpoint-security.client" "$IDENTITY_HASH")}"
+
   if [[ -z "$HOST_PROVISIONING_PROFILE" || -z "$EXTENSION_PROVISIONING_PROFILE" ]]; then
     cat >&2 <<EOF
 Missing provisioning profile for restricted System Extension entitlements.
@@ -180,6 +357,7 @@ Missing provisioning profile for restricted System Extension entitlements.
 Expected matching profiles:
 - $HOST_BUNDLE_ID with com.apple.developer.system-extension.install
 - $EXTENSION_BUNDLE_ID with com.apple.developer.endpoint-security.client
+- profiles must authorize the selected signing identity
 
 Searched:
 $PROVISIONING_PROFILE_DIR
@@ -189,6 +367,12 @@ if Xcode stores them elsewhere.
 EOF
     exit 4
   fi
+
+  validate_provisioning_profile "$HOST_PROVISIONING_PROFILE" "$HOST_BUNDLE_ID" "com.apple.developer.system-extension.install" "$IDENTITY_HASH" "host app"
+  validate_provisioning_profile "$EXTENSION_PROVISIONING_PROFILE" "$EXTENSION_BUNDLE_ID" "com.apple.developer.endpoint-security.client" "$IDENTITY_HASH" "System Extension"
+
+  cp "$HOST_PROVISIONING_PROFILE" "$APP_BUNDLE/Contents/embedded.provisionprofile"
+  cp "$EXTENSION_PROVISIONING_PROFILE" "$EXT_BUNDLE/Contents/embedded.provisionprofile"
 
   codesign --force "${CODE_SIGN_TIMESTAMP_ARGS[@]}" --options runtime --generate-entitlement-der \
     --entitlements "$CONFIG_DIR/MacFSWSystemExtension.entitlements" \
@@ -203,7 +387,7 @@ EOF
   verify_entitlement() {
     local bundle="$1"
     local key="$2"
-    if ! codesign -d --entitlements :- "$bundle" 2>/dev/null | grep -q "<key>$key</key>"; then
+    if ! codesign -d --entitlements - "$bundle" 2>/dev/null | grep -q "\[Key\] $key"; then
       echo "Signed bundle is missing required entitlement: $key" >&2
       echo "Bundle: $bundle" >&2
       exit 3
