@@ -106,35 +106,12 @@ decode_provisioning_profile() {
     || openssl cms -inform DER -verify -noverify -in "$profile" -out "$destination" >/dev/null 2>&1
 }
 
-profile_allows_endpoint_security_developer_id() {
-  local profile="$1"
-  local temp_dir profile_plist provisions_all_devices
-
-  temp_dir="$(mktemp -d)"
-  profile_plist="$temp_dir/profile.plist"
-
-  if ! decode_provisioning_profile "$profile" "$profile_plist"; then
-    rm -rf "$temp_dir"
-    return 1
-  fi
-
-  provisions_all_devices="$(/usr/libexec/PlistBuddy -c "Print :ProvisionsAllDevices" "$profile_plist" 2>/dev/null || true)"
-  rm -rf "$temp_dir"
-
-  [[ "$provisions_all_devices" == "true" ]]
-}
-
 profile_authorizes_required_entitlement() {
   local profile="$1"
   local bundle_id="$2"
   local required_entitlement="$3"
 
-  profile_matches "$profile" "$bundle_id" "$required_entitlement" \
-    || {
-      [[ "$required_entitlement" == "com.apple.developer.endpoint-security.client" ]] \
-        && profile_matches_app_identifier "$profile" "$bundle_id" \
-        && profile_allows_endpoint_security_developer_id "$profile"
-    }
+  profile_matches "$profile" "$bundle_id" "$required_entitlement"
 }
 
 profile_authorizes_identity() {
