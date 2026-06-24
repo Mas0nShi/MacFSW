@@ -6,11 +6,13 @@ public enum MacFSWXPCDefaults {
 
 public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Sendable {
     private let serviceName: String
+    private let healthTimeoutSeconds: UInt64
     private let encoder = JSONEncoder.macfsw
     private let decoder = JSONDecoder.macfsw
 
-    public init(serviceName: String = MacFSWXPCDefaults.serviceName) {
+    public init(serviceName: String = MacFSWXPCDefaults.serviceName, healthTimeoutSeconds: UInt64 = 8) {
         self.serviceName = serviceName
+        self.healthTimeoutSeconds = max(1, healthTimeoutSeconds)
     }
 
     public func health() async throws -> MacFSWCaptureHealth {
@@ -28,6 +30,10 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
             }
 
             connection.resume()
+            Task {
+                try? await Task.sleep(nanoseconds: healthTimeoutSeconds * 1_000_000_000)
+                state.finish(.failure(MacFSWClientError.xpcUnavailable("Health check timed out.")))
+            }
             proxy.health { data, errorMessage in
                 state.finish(self.decodeResult(data: data, errorMessage: errorMessage, as: MacFSWCaptureHealth.self))
             }
