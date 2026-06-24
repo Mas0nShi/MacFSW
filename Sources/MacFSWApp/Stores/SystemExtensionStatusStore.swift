@@ -59,6 +59,7 @@ final class SystemExtensionStatusStore: ObservableObject {
         if installState != .activating && installState != .needsApproval {
             installState = .notReady
             installMessage = "MacFSW Endpoint Extension is not installed, not approved, or not reachable."
+            installer.checkInstalledVersion()
         }
     }
 

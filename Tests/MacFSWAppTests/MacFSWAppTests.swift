@@ -166,6 +166,17 @@ final class MacFSWAppTests: XCTestCase {
         XCTAssertEqual(store.statusText, "Select a process to analyze.")
     }
 
+    @MainActor
+    func testHealthRefreshFailureChecksInstalledSystemExtensionVersion() {
+        let installer = TestSystemExtensionInstaller()
+        let store = SystemExtensionStatusStore(installer: installer)
+
+        store.applyHealthRefreshFailure(message: "XPC unavailable")
+
+        XCTAssertEqual(store.installState, .notReady)
+        XCTAssertEqual(installer.checkInstalledVersionCallCount, 1)
+    }
+
     private func makeProcessSummary(id: String, lifecycle: MacFSWProcessLifecycle) -> MacFSWProcessSummary {
         MacFSWProcessSummary(
             id: id,
@@ -185,3 +196,21 @@ final class MacFSWAppTests: XCTestCase {
 }
 
 private struct TestPlainError: Error {}
+
+@MainActor
+private final class TestSystemExtensionInstaller: SystemExtensionInstalling {
+    var onStateChange: ((MacFSWSystemExtensionInstallState, String) -> Void)?
+    private(set) var checkInstalledVersionCallCount = 0
+
+    func activate() {}
+
+    func checkInstalledVersion() {
+        checkInstalledVersionCallCount += 1
+    }
+
+    func resetSubmission() {}
+
+    func openLoginItemsSettings() {}
+
+    func openFullDiskAccessSettings() {}
+}
