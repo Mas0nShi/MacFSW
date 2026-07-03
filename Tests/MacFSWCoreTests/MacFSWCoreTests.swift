@@ -548,6 +548,97 @@ final class MacFSWCoreTests: XCTestCase {
         }
     }
 
+    func testSQLiteDistinctValuesFacetByQuery() async throws {
+        let store = try MacFSWSQLiteEventStore.temporary()
+        let safari = MacFSWProcessIdentity(
+            pid: 100,
+            auditToken: "safari",
+            executablePath: "/Applications/Safari.app/Contents/MacOS/Safari",
+            processName: "Safari",
+            teamID: "APPLE1"
+        )
+        let installer = MacFSWProcessIdentity(
+            pid: 200,
+            auditToken: "installer",
+            executablePath: "/usr/sbin/installer",
+            processName: "installer",
+            teamID: "APPLE2"
+        )
+        _ = try await store.appendReturningEvents([
+            MacFSWFileEvent(eventType: .write, process: safari, targetPath: "/tmp/a"),
+            MacFSWFileEvent(eventType: .write, process: safari, targetPath: "/tmp/b"),
+            MacFSWFileEvent(eventType: .rename, process: installer, targetPath: "/tmp/c", sourcePath: "/tmp/d"),
+        ])
+
+        let writeProcesses = try await store.distinctValues(
+            for: .processName,
+            matching: MacFSWQueryParser.parse("op:write"),
+            limit: 50
+        )
+        XCTAssertEqual(writeProcesses, [MacFSWFacetValue(value: "Safari", count: 2)])
+
+        let allProcesses = try await store.distinctValues(
+            for: .processName,
+            matching: MacFSWQueryParser.parse(""),
+            limit: 50
+        )
+        XCTAssertEqual(
+            allProcesses,
+            [
+                MacFSWFacetValue(value: "Safari", count: 2),
+                MacFSWFacetValue(value: "installer", count: 1),
+            ]
+        )
+
+        let renameTeams = try await store.distinctValues(
+            for: .teamID,
+            matching: MacFSWQueryParser.parse("op:rename"),
+            limit: 50
+        )
+        XCTAssertEqual(renameTeams, [MacFSWFacetValue(value: "APPLE2", count: 1)])
+
+        let nonFacetable = try await store.distinctValues(
+            for: .eventType,
+            matching: MacFSWQueryParser.parse(""),
+            limit: 50
+        )
+        XCTAssertEqual(nonFacetable, [])
+    }
+
+    func testInMemoryDistinctValuesFacetByQuery() async {
+        let store = MacFSWInMemoryEventStore(maxEvents: 1_000)
+        let tester = MacFSWProcessIdentity(
+            pid: 42,
+            auditToken: "test",
+            executablePath: "/usr/libexec/tester",
+            processName: "tester"
+        )
+        let other = MacFSWProcessIdentity(
+            pid: 43,
+            auditToken: "other",
+            executablePath: "/usr/libexec/other",
+            processName: "other"
+        )
+        _ = await store.append([
+            MacFSWFileEvent(eventType: .write, process: tester, targetPath: "/tmp/a"),
+            MacFSWFileEvent(eventType: .unlink, process: other, targetPath: "/tmp/b"),
+        ])
+
+        let writers = await store.distinctValues(
+            for: .processName,
+            matching: MacFSWQueryParser.parse("op:write"),
+            limit: 10
+        )
+        XCTAssertEqual(writers, [MacFSWFacetValue(value: "tester", count: 1)])
+
+        let pids = await store.distinctValues(
+            for: .pid,
+            matching: MacFSWQueryParser.parse(""),
+            limit: 10
+        )
+        XCTAssertEqual(Set(pids.map(\.value)), ["42", "43"])
+    }
+
     func testFieldCatalogCoversEveryQueryField() {
         let coveredFields = MacFSWQueryFieldCatalog.descriptors.map(\.field)
         XCTAssertEqual(Set(coveredFields), Set(MacFSWQueryField.allCases))

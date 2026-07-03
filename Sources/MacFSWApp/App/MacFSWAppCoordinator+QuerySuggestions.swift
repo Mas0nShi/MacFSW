@@ -31,13 +31,111 @@ extension MacFSWAppCoordinator {
         guard !monitorStore.suppressSuggestionsForCurrentText else {
             return
         }
-        let context = QuerySuggestionEngine.context(
+        var context = QuerySuggestionEngine.context(
             from: processSidebarStore.processSummaries,
             history: queryHistoryStore.entries
         )
+        applyFacetCandidates(into: &context)
         querySuggestions = QuerySuggestionEngine.suggestions(for: queryText, context: context)
         isQuerySuggestionListVisible = !querySuggestions.isEmpty
         querySuggestionHighlight = nil
+    }
+
+    // MARK: - Faceted value candidates
+
+    /// When the caret sits in a facetable field's value position AND the
+    /// query already carries conditions, value candidates come from the
+    /// event store filtered by those conditions ("only processes that have
+    /// write events"), fetched once per (conditions, field) pair. Until the
+    /// fetch lands — and whenever it fails — the full in-memory candidate
+    /// lists stay in effect.
+    private func applyFacetCandidates(into context: inout QuerySuggestionContext) {
+        let cursor = MacFSWQueryCursorContext.trailing(of: queryText)
+        guard case .fieldValue(let descriptor, _, _, _, _) = cursor.position,
+              isFacetable(descriptor.valueKind) else {
+            cancelFacetPrefetch()
+            return
+        }
+        let prefixQuery = MacFSWQueryParser.parse(cursor.prefixText)
+        guard prefixQuery.expression != nil else {
+            cancelFacetPrefetch()
+            return
+        }
+
+        let key = prefixQuery.text + "\u{1F}" + descriptor.canonicalKey
+        if monitorStore.facetValueKey == key {
+            assignFacetValues(monitorStore.facetValues, for: descriptor.valueKind, into: &context)
+            return
+        }
+        scheduleFacetPrefetch(key: key, field: descriptor.field, query: prefixQuery)
+    }
+
+    private func isFacetable(_ kind: MacFSWQueryValueKind) -> Bool {
+        switch kind {
+        case .processName, .pid, .executable, .signingID, .teamID:
+            return true
+        case .eventType, .operationClass, .boolean, .path, .numeric, .text:
+            return false
+        }
+    }
+
+    private func assignFacetValues(
+        _ values: [(value: String, detail: String?)],
+        for kind: MacFSWQueryValueKind,
+        into context: inout QuerySuggestionContext
+    ) {
+        switch kind {
+        case .processName:
+            context.processNames = values
+        case .pid:
+            context.pids = values
+        case .executable:
+            context.executables = values
+        case .signingID:
+            context.signingIDs = values
+        case .teamID:
+            context.teamIDs = values
+        case .eventType, .operationClass, .boolean, .path, .numeric, .text:
+            break
+        }
+    }
+
+    private func scheduleFacetPrefetch(key: String, field: MacFSWQueryField, query: MacFSWEventQuery) {
+        guard monitorStore.facetRequestKey != key else {
+            return
+        }
+        monitorStore.facetTask?.cancel()
+        monitorStore.facetRequestKey = key
+        let store = eventStore
+        monitorStore.facetTask = Task { [weak self] in
+            let values: [MacFSWFacetValue]?
+            do {
+                values = try await store.distinctValues(for: field, matching: query, limit: 50)
+            } catch {
+                values = nil
+            }
+            guard !Task.isCancelled, let self, self.monitorStore.facetRequestKey == key else {
+                return
+            }
+            self.monitorStore.facetTask = nil
+            guard let values else {
+                // Failed fetch: fall back to the full candidate lists and
+                // allow a later retry.
+                self.monitorStore.facetRequestKey = nil
+                return
+            }
+            self.monitorStore.facetValues = values.map {
+                (value: $0.value, detail: $0.count == 1 ? "1 matching event" : "\($0.count) matching events")
+            }
+            self.monitorStore.facetValueKey = key
+            self.refreshQuerySuggestions()
+        }
+    }
+
+    private func cancelFacetPrefetch() {
+        monitorStore.facetTask?.cancel()
+        monitorStore.facetTask = nil
+        monitorStore.facetRequestKey = nil
     }
 
     func moveSuggestionHighlight(by delta: Int) {
@@ -109,6 +207,10 @@ extension MacFSWAppCoordinator {
         querySuggestionHighlight = nil
         monitorStore.querySuggestionPreviewBasis = nil
         monitorStore.suppressSuggestionsForCurrentText = true
+        // Facet counts are only guaranteed fresh within one dropdown session.
+        cancelFacetPrefetch()
+        monitorStore.facetValueKey = nil
+        monitorStore.facetValues = []
     }
 
     /// Esc: restore what the user typed before Tab previewing, then close.

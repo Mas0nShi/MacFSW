@@ -28,6 +28,12 @@ final class MonitorStore: ObservableObject {
     var suppressSuggestionsForCurrentText = false
     /// User-typed text captured when Tab previewing starts, restored on Esc.
     var querySuggestionPreviewBasis: String?
+    /// Faceted value candidates for the current (prefix conditions, field)
+    /// pair; single-entry cache scoped to one suggestion session.
+    var facetValues: [(value: String, detail: String?)] = []
+    var facetValueKey: String?
+    var facetRequestKey: String?
+    var facetTask: Task<Void, Never>?
 
     var refreshTask: Task<Void, Never>?
     var renderTask: Task<Void, Never>?
