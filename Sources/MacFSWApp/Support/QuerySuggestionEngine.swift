@@ -28,29 +28,31 @@ struct QuerySuggestionContext: Sendable {
 
 enum QuerySuggestionEngine {
     static func suggestions(for text: String, context: QuerySuggestionContext) -> [QuerySuggestion] {
-        let token = trailingToken(of: text)
-        guard !token.isInsideQuotes else {
+        let cursor = MacFSWQueryCursorContext.trailing(of: text)
+        guard cursor.position != .insideQuotes else {
             return []
         }
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return emptyInputSuggestions(context: context)
         }
 
-        switch classify(token.body) {
+        switch cursor.position {
+        case .insideQuotes:
+            return []
         case .bare(let prefix):
-            var ranked = rankedFieldSuggestions(prefix: prefix, prefixText: token.prefixText)
-            if !prefix.isEmpty, !token.isNegated {
-                ranked += rankedKeywordSuggestions(prefix: prefix, prefixText: token.prefixText)
+            var ranked = rankedFieldSuggestions(prefix: prefix, prefixText: cursor.prefixText)
+            if !prefix.isEmpty, !cursor.isNegated {
+                ranked += rankedKeywordSuggestions(prefix: prefix, prefixText: cursor.prefixText)
             }
             return assemble(ranked)
-        case .value(let descriptor, let fieldText, let operatorText, let priorValues, let valuePrefix):
+        case .fieldValue(let descriptor, let fieldText, let operatorText, let priorValues, let valuePrefix):
             return valueSuggestions(
                 descriptor: descriptor,
                 fieldText: fieldText,
                 operatorText: operatorText,
                 priorValues: priorValues,
                 valuePrefix: valuePrefix,
-                prefixText: token.prefixText,
+                prefixText: cursor.prefixText,
                 context: context
             )
         case .unknownField:
@@ -110,97 +112,6 @@ enum QuerySuggestionEngine {
             return delta >= 0 ? 0 : count - 1
         }
         return (current + delta + count) % count
-    }
-
-    // MARK: - Trailing token
-
-    private struct TrailingToken {
-        var body: String
-        var prefixText: String
-        var isNegated: Bool
-        var isInsideQuotes: Bool
-    }
-
-    private static func trailingToken(of text: String) -> TrailingToken {
-        var inQuotes = false
-        var tokenStart = text.startIndex
-        var index = text.startIndex
-        while index < text.endIndex {
-            let character = text[index]
-            if character == "\"" {
-                inQuotes.toggle()
-            } else if !inQuotes, character.isWhitespace || character == "(" || character == ")" {
-                tokenStart = text.index(after: index)
-            }
-            index = text.index(after: index)
-        }
-
-        var body = String(text[tokenStart...])
-        var prefixText = String(text[..<tokenStart])
-        var isNegated = false
-        if body.hasPrefix("-") {
-            isNegated = true
-            body.removeFirst()
-            prefixText += "-"
-        }
-        return TrailingToken(
-            body: body,
-            prefixText: prefixText,
-            isNegated: isNegated,
-            isInsideQuotes: inQuotes
-        )
-    }
-
-    // MARK: - Classification
-
-    private enum Position {
-        case bare(prefix: String)
-        case value(
-            descriptor: MacFSWQueryFieldDescriptor,
-            fieldText: String,
-            operatorText: String,
-            priorValues: String,
-            valuePrefix: String
-        )
-        case unknownField
-    }
-
-    /// Mirrors `MacFSWQueryParser.parseFieldExpression`: same operator set,
-    /// same scan order, same catalog lookup — with one deliberate difference:
-    /// an empty value ("op:") is a value position here, because that is
-    /// exactly the moment the user wants candidates.
-    private static let operatorTexts = ["!=", ">=", "<=", "=", ":", ">", "<"]
-
-    private static func classify(_ body: String) -> Position {
-        for operatorText in operatorTexts {
-            guard let range = body.range(of: operatorText) else {
-                continue
-            }
-            let fieldText = String(body[..<range.lowerBound])
-            let valueText = String(body[range.upperBound...])
-            guard !fieldText.isEmpty else {
-                return .bare(prefix: body)
-            }
-            guard let field = MacFSWQueryFieldCatalog.field(forRawKey: fieldText),
-                  let descriptor = MacFSWQueryFieldCatalog.descriptor(for: field) else {
-                return .unknownField
-            }
-
-            var priorValues = ""
-            var valuePrefix = valueText
-            if let lastComma = valueText.lastIndex(of: ",") {
-                priorValues = String(valueText[...lastComma])
-                valuePrefix = String(valueText[valueText.index(after: lastComma)...])
-            }
-            return .value(
-                descriptor: descriptor,
-                fieldText: fieldText,
-                operatorText: operatorText,
-                priorValues: priorValues,
-                valuePrefix: valuePrefix
-            )
-        }
-        return .bare(prefix: body)
     }
 
     // MARK: - Candidates
