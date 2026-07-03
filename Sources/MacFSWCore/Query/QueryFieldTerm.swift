@@ -1,14 +1,14 @@
 import Foundation
 
-/// The single owner of field/operator/value splitting. The parser and the
-/// cursor-context API (completion) both consume this — operator knowledge
-/// must never exist in a second place.
-enum MacFSWQueryFieldTerm {
-    struct Split: Equatable {
-        var fieldText: String
-        var operatorText: String
-        var comparison: MacFSWQueryComparison
-        var valueText: String
+/// The single owner of field/operator/value splitting. The parser, the
+/// cursor-context API (completion), and syntax highlighting all consume
+/// this — operator knowledge must never exist in a second place.
+public enum MacFSWQueryFieldTerm {
+    public struct Split: Equatable, Sendable {
+        public var fieldText: String
+        public var operatorText: String
+        public var comparison: MacFSWQueryComparison
+        public var valueText: String
     }
 
     private static let twoCharacterOperators: [(String, MacFSWQueryComparison)] = [
@@ -27,7 +27,7 @@ enum MacFSWQueryFieldTerm {
     /// Leftmost occurrence wins; at a given position the longest operator
     /// wins ("!=" beats "=", ">=" beats ">"). This is what makes
     /// `path:/foo=bar` split at ":" instead of degrading to full text.
-    static func split(_ word: String) -> Split? {
+    public static func split(_ word: String) -> Split? {
         var index = word.startIndex
         while index < word.endIndex {
             for (operatorText, comparison) in twoCharacterOperators {

@@ -25,6 +25,9 @@ final class MonitorStore: ObservableObject {
     @Published var querySuggestionHighlight: Int?
     @Published var isQuerySuggestionListVisible = false
     @Published var queryDiagnostics: [MacFSWQueryDiagnostic] = []
+    /// Last front-end parse of `queryText`; lets suggestions, diagnostics,
+    /// and highlighting share one parse per keystroke.
+    var lastQueryParse: MacFSWQueryParseResult?
     var suppressSuggestionsForCurrentText = false
     /// User-typed text captured when Tab previewing starts, restored on Esc.
     var querySuggestionPreviewBasis: String?

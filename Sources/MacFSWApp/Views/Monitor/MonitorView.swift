@@ -75,6 +75,9 @@ struct MonitorCommandBar: View {
                     },
                     onDismissSuggestions: {
                         model.dismissQuerySuggestions()
+                    },
+                    highlight: { text in
+                        model.queryHighlightRuns(for: text)
                     }
                 )
 

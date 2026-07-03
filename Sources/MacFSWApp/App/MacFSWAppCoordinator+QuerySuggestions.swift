@@ -8,8 +8,19 @@ extension MacFSWAppCoordinator {
     @discardableResult
     func parseCurrentQueryText() -> MacFSWQueryParseResult {
         let result = MacFSWQueryParser.parseDetailed(queryText)
+        monitorStore.lastQueryParse = result
         queryDiagnostics = result.diagnostics
         return result
+    }
+
+    func queryHighlightRuns(for text: String) -> [QueryHighlighter.AttributeRun] {
+        let result: MacFSWQueryParseResult
+        if let cached = monitorStore.lastQueryParse, cached.tokens.source == text {
+            result = cached
+        } else {
+            result = MacFSWQueryParser.parseDetailed(text)
+        }
+        return QueryHighlighter.attributeRuns(for: result)
     }
 
     var queryDiagnosticSummary: String? {

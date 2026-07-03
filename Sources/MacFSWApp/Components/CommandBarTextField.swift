@@ -16,6 +16,7 @@ struct CommandBarTextField: NSViewRepresentable {
     var onAcceptSuggestion: () -> Bool
     var onCancelSuggestions: () -> Void
     var onDismissSuggestions: () -> Void
+    var highlight: (String) -> [QueryHighlighter.AttributeRun]
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -27,7 +28,8 @@ struct CommandBarTextField: NSViewRepresentable {
             onCycleHighlight: onCycleHighlight,
             onAcceptSuggestion: onAcceptSuggestion,
             onCancelSuggestions: onCancelSuggestions,
-            onDismissSuggestions: onDismissSuggestions
+            onDismissSuggestions: onDismissSuggestions,
+            highlight: highlight
         )
     }
 
@@ -59,6 +61,7 @@ struct CommandBarTextField: NSViewRepresentable {
         context.coordinator.onDismissSuggestions = onDismissSuggestions
 
         guard field.stringValue != text else {
+            context.coordinator.applyHighlight(to: field)
             return
         }
         context.coordinator.isApplyingProgrammaticChange = true
@@ -69,6 +72,7 @@ struct CommandBarTextField: NSViewRepresentable {
         if let editor = field.currentEditor() {
             editor.selectedRange = NSRange(location: (text as NSString).length, length: 0)
         }
+        context.coordinator.applyHighlight(to: field)
     }
 
     @MainActor
@@ -82,6 +86,7 @@ struct CommandBarTextField: NSViewRepresentable {
         var onAcceptSuggestion: () -> Bool
         var onCancelSuggestions: () -> Void
         var onDismissSuggestions: () -> Void
+        var highlight: (String) -> [QueryHighlighter.AttributeRun]
         var isApplyingProgrammaticChange = false
         private var dismissalGeneration = 0
 
@@ -94,7 +99,8 @@ struct CommandBarTextField: NSViewRepresentable {
             onCycleHighlight: @escaping (Int) -> Void,
             onAcceptSuggestion: @escaping () -> Bool,
             onCancelSuggestions: @escaping () -> Void,
-            onDismissSuggestions: @escaping () -> Void
+            onDismissSuggestions: @escaping () -> Void,
+            highlight: @escaping (String) -> [QueryHighlighter.AttributeRun]
         ) {
             self.text = text
             self.isSuggestionListVisible = isSuggestionListVisible
@@ -105,6 +111,7 @@ struct CommandBarTextField: NSViewRepresentable {
             self.onAcceptSuggestion = onAcceptSuggestion
             self.onCancelSuggestions = onCancelSuggestions
             self.onDismissSuggestions = onDismissSuggestions
+            self.highlight = highlight
         }
 
         func controlTextDidChange(_ notification: Notification) {
@@ -115,6 +122,44 @@ struct CommandBarTextField: NSViewRepresentable {
             cancelScheduledDismissal()
             text.wrappedValue = field.stringValue
             onEditingChanged()
+            applyHighlight(to: field)
+        }
+
+        /// Re-applies syntax attributes to the active field editor without
+        /// replacing characters, so the caret and undo stack stay intact.
+        /// Skipped while an input method holds marked text.
+        func applyHighlight(to field: NSTextField) {
+            guard let editor = field.currentEditor() as? NSTextView,
+                  let textStorage = editor.textStorage,
+                  !editor.hasMarkedText() else {
+                return
+            }
+            let text = field.stringValue
+            let fullRange = NSRange(location: 0, length: (text as NSString).length)
+            guard textStorage.length == fullRange.length else {
+                return
+            }
+
+            isApplyingProgrammaticChange = true
+            defer {
+                isApplyingProgrammaticChange = false
+            }
+            textStorage.beginEditing()
+            textStorage.setAttributes(
+                [
+                    .foregroundColor: NSColor.labelColor,
+                    .font: field.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                ],
+                range: fullRange
+            )
+            for run in highlight(text) where NSMaxRange(run.range) <= fullRange.length {
+                textStorage.addAttributes(run.attributes, range: run.range)
+            }
+            textStorage.endEditing()
+            editor.typingAttributes = [
+                .foregroundColor: NSColor.labelColor,
+                .font: field.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
+            ]
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
