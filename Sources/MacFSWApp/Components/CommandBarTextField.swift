@@ -68,22 +68,24 @@ struct CommandBarTextField: NSViewRepresentable {
         defer {
             context.coordinator.isApplyingProgrammaticChange = false
         }
-        if let editor = field.currentEditor() as? NSTextView {
-            // Route programmatic fills (suggestion accept, Tab preview)
-            // through the field editor's change pipeline so they register
-            // with the undo manager — plain stringValue assignment would
-            // make them un-undoable.
-            let fullRange = NSRange(location: 0, length: (editor.string as NSString).length)
-            if editor.shouldChangeText(in: fullRange, replacementString: text) {
-                editor.replaceCharacters(in: fullRange, with: text)
-                editor.didChangeText()
-            } else {
-                field.stringValue = text
-            }
-            editor.selectedRange = NSRange(location: (text as NSString).length, length: 0)
-        } else {
+        guard let editor = field.currentEditor() as? NSTextView else {
+            // Not being edited: no editing session exists, so there is no
+            // undo context — plain assignment is the whole mechanism here,
+            // not a degraded path.
             field.stringValue = text
+            return
         }
+        // Programmatic fills (suggestion accept, Tab preview) go through the
+        // field editor's change pipeline: shouldChangeText is where
+        // NSTextView registers undo. This component owns the entire delegate
+        // chain and nothing vetoes edits, so a veto is a bug to surface —
+        // asserted, never papered over with a side-door assignment.
+        let fullRange = NSRange(location: 0, length: (editor.string as NSString).length)
+        let accepted = editor.shouldChangeText(in: fullRange, replacementString: text)
+        assert(accepted, "command bar field editor vetoed a programmatic fill")
+        editor.replaceCharacters(in: fullRange, with: text)
+        editor.didChangeText()
+        editor.selectedRange = NSRange(location: (text as NSString).length, length: 0)
         context.coordinator.applyHighlight(to: field)
     }
 
