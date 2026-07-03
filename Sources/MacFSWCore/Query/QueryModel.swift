@@ -301,244 +301,6 @@ public enum MacFSWEventSortOrder: String, Codable, Equatable, Sendable {
     case oldestFirst
 }
 
-public enum MacFSWQueryParser {
-    public static func parse(_ rawText: String, base: MacFSWEventQuery = MacFSWEventQuery()) -> MacFSWEventQuery {
-        var query = base
-        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        query.text = trimmed
-        query.expression = nil
-
-        guard !trimmed.isEmpty else {
-            return query
-        }
-
-        var parser = ExpressionParser(tokens: tokenize(trimmed))
-        query.expression = parser.parse()
-        return query
-    }
-
-    private static func tokenize(_ input: String) -> [QueryToken] {
-        var tokens: [QueryToken] = []
-        var current = ""
-        var inQuotes = false
-
-        func flushCurrent() {
-            guard !current.isEmpty else {
-                return
-            }
-            let token = current
-            current.removeAll(keepingCapacity: true)
-            switch token.uppercased() {
-            case "AND":
-                tokens.append(.and)
-            case "OR":
-                tokens.append(.or)
-            case "NOT":
-                tokens.append(.not)
-            default:
-                if token.hasPrefix("-"), token.count > 1 {
-                    tokens.append(.not)
-                    tokens.append(.word(String(token.dropFirst())))
-                } else {
-                    tokens.append(.word(token))
-                }
-            }
-        }
-
-        for character in input {
-            if character == "\"" {
-                inQuotes.toggle()
-                continue
-            }
-
-            if !inQuotes, character == "(" {
-                flushCurrent()
-                tokens.append(.leftParen)
-                continue
-            }
-
-            if !inQuotes, character == ")" {
-                flushCurrent()
-                tokens.append(.rightParen)
-                continue
-            }
-
-            if character.isWhitespace && !inQuotes {
-                flushCurrent()
-            } else {
-                current.append(character)
-            }
-        }
-
-        flushCurrent()
-        return tokens
-    }
-}
-
-private struct ExpressionParser {
-    var tokens: [QueryToken]
-    var index = 0
-
-    mutating func parse() -> MacFSWQueryExpression? {
-        parseOr()
-    }
-
-    private mutating func parseOr() -> MacFSWQueryExpression? {
-        guard var expression = parseAnd() else {
-            return nil
-        }
-
-        var expressions = [expression]
-        while consume(.or) {
-            guard let right = parseAnd() else {
-                break
-            }
-            expressions.append(right)
-        }
-
-        if expressions.count > 1 {
-            expression = .or(expressions)
-        }
-        return expression
-    }
-
-    private mutating func parseAnd() -> MacFSWQueryExpression? {
-        guard let first = parseUnary() else {
-            return nil
-        }
-
-        var expressions = [first]
-        while true {
-            if consume(.and) {
-                if let next = parseUnary() {
-                    expressions.append(next)
-                }
-                continue
-            }
-
-            guard startsPrimary(peek) else {
-                break
-            }
-
-            if let next = parseUnary() {
-                expressions.append(next)
-            } else {
-                break
-            }
-        }
-
-        return expressions.count == 1 ? expressions[0] : .and(expressions)
-    }
-
-    private mutating func parseUnary() -> MacFSWQueryExpression? {
-        if consume(.not) {
-            guard let expression = parseUnary() else {
-                return nil
-            }
-            return .not(expression)
-        }
-        return parsePrimary()
-    }
-
-    private mutating func parsePrimary() -> MacFSWQueryExpression? {
-        guard let token = peek else {
-            return nil
-        }
-
-        switch token {
-        case .leftParen:
-            advance()
-            let expression = parseOr()
-            _ = consume(.rightParen)
-            return expression
-        case .word(let word):
-            advance()
-            return .predicate(predicate(for: word))
-        case .and, .or, .not, .rightParen:
-            return nil
-        }
-    }
-
-    private func predicate(for word: String) -> MacFSWQueryPredicate {
-        guard let fieldExpression = parseFieldExpression(word),
-              let field = MacFSWQueryField.lookup(fieldExpression.field) else {
-            return MacFSWQueryPredicate(field: .any, comparison: .contains, values: [word])
-        }
-
-        return MacFSWQueryPredicate(
-            field: field,
-            comparison: fieldExpression.comparison,
-            values: splitValues(fieldExpression.value)
-        )
-    }
-
-    private func parseFieldExpression(_ word: String) -> (field: String, comparison: MacFSWQueryComparison, value: String)? {
-        let operators: [(String, MacFSWQueryComparison)] = [
-            ("!=", .notEquals),
-            (">=", .greaterOrEqual),
-            ("<=", .lessOrEqual),
-            ("=", .equals),
-            (":", .contains),
-            (">", .greaterThan),
-            ("<", .lessThan),
-        ]
-
-        for (operatorText, comparison) in operators {
-            guard let range = word.range(of: operatorText) else {
-                continue
-            }
-            let field = String(word[..<range.lowerBound])
-            let value = String(word[range.upperBound...])
-            guard !field.isBlank, !value.isBlank else {
-                return nil
-            }
-            return (field, comparison, value)
-        }
-
-        return nil
-    }
-
-    private func splitValues(_ value: String) -> [String] {
-        value.split(separator: ",")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    private var peek: QueryToken? {
-        index < tokens.count ? tokens[index] : nil
-    }
-
-    private mutating func advance() {
-        index += 1
-    }
-
-    private mutating func consume(_ token: QueryToken) -> Bool {
-        guard peek == token else {
-            return false
-        }
-        advance()
-        return true
-    }
-
-    private func startsPrimary(_ token: QueryToken?) -> Bool {
-        switch token {
-        case .word, .leftParen, .not:
-            return true
-        case .and, .or, .rightParen, nil:
-            return false
-        }
-    }
-}
-
-private enum QueryToken: Equatable {
-    case word(String)
-    case leftParen
-    case rightParen
-    case and
-    case or
-    case not
-}
-
 private enum MacFSWQueryMatcher {
     static func matches(_ pattern: String, in values: [String], equalityOnly: Bool = false) -> Bool {
         let normalized = pattern.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -589,12 +351,6 @@ private enum MacFSWQueryMatcher {
         }
 
         return patternIndex == pattern.count
-    }
-}
-
-private extension MacFSWQueryField {
-    static func lookup(_ rawField: String) -> MacFSWQueryField? {
-        MacFSWQueryFieldCatalog.field(forRawKey: rawField)
     }
 }
 
@@ -733,13 +489,13 @@ extension String {
             .replacingOccurrences(of: "_", with: "")
             .replacingOccurrences(of: "-", with: "")
     }
-}
 
-private extension String {
     var isBlank: Bool {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+}
 
+private extension String {
     var containsWildcard: Bool {
         contains("*") || contains("?")
     }
