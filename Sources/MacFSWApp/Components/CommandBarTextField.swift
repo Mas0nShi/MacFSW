@@ -68,9 +68,21 @@ struct CommandBarTextField: NSViewRepresentable {
         defer {
             context.coordinator.isApplyingProgrammaticChange = false
         }
-        field.stringValue = text
-        if let editor = field.currentEditor() {
+        if let editor = field.currentEditor() as? NSTextView {
+            // Route programmatic fills (suggestion accept, Tab preview)
+            // through the field editor's change pipeline so they register
+            // with the undo manager — plain stringValue assignment would
+            // make them un-undoable.
+            let fullRange = NSRange(location: 0, length: (editor.string as NSString).length)
+            if editor.shouldChangeText(in: fullRange, replacementString: text) {
+                editor.replaceCharacters(in: fullRange, with: text)
+                editor.didChangeText()
+            } else {
+                field.stringValue = text
+            }
             editor.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+        } else {
+            field.stringValue = text
         }
         context.coordinator.applyHighlight(to: field)
     }
