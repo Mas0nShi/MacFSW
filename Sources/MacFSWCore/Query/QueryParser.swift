@@ -2,24 +2,50 @@ import Foundation
 
 public enum MacFSWQueryParser {
     public static func parse(_ rawText: String, base: MacFSWEventQuery = MacFSWEventQuery()) -> MacFSWEventQuery {
+        parseDetailed(rawText, base: base).query
+    }
+
+    /// Lenient parse with a side channel of healing diagnostics. The query
+    /// is byte-identical to `parse(_:base:)` — diagnostics never change the
+    /// interpretation, they only name it.
+    public static func parseDetailed(_ rawText: String, base: MacFSWEventQuery = MacFSWEventQuery()) -> MacFSWQueryParseResult {
         var query = base
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         query.text = trimmed
         query.expression = nil
 
-        guard !trimmed.isEmpty else {
-            return query
+        let stream = MacFSWQueryLexer.tokenize(rawText)
+        var diagnostics: [MacFSWQueryDiagnostic] = []
+        if stream.endsInsideQuotes {
+            let range = rawText.lastIndex(of: "\"").map { $0..<rawText.endIndex }
+            diagnostics.append(MacFSWQueryDiagnostic(kind: .unterminatedQuote, range: range))
         }
 
-        var parser = ExpressionParser(tokens: MacFSWQueryLexer.tokenize(rawText).tokens)
+        guard !trimmed.isEmpty else {
+            return MacFSWQueryParseResult(query: query, tokens: stream, diagnostics: diagnostics)
+        }
+
+        var parser = ExpressionParser(tokens: stream.tokens)
         query.expression = parser.parse()
-        return query
+        diagnostics.append(contentsOf: parser.diagnostics)
+
+        // The grammar stops at a close paren it never opened; everything
+        // after it is discarded (legacy healing, kept as-is).
+        if parser.index < stream.tokens.count, stream.tokens[parser.index].kind == .rightParen {
+            diagnostics.append(MacFSWQueryDiagnostic(
+                kind: .unexpectedCloseParen,
+                range: stream.tokens[parser.index].range
+            ))
+        }
+
+        return MacFSWQueryParseResult(query: query, tokens: stream, diagnostics: diagnostics)
     }
 }
 
 private struct ExpressionParser {
     var tokens: [MacFSWQueryToken]
     var index = 0
+    var diagnostics: [MacFSWQueryDiagnostic] = []
 
     mutating func parse() -> MacFSWQueryExpression? {
         parseOr()
@@ -31,8 +57,9 @@ private struct ExpressionParser {
         }
 
         var expressions = [expression]
-        while consume(.or) {
+        while let orToken = consumeToken(.or) {
             guard let right = parseAnd() else {
+                reportDangling(orToken)
                 break
             }
             expressions.append(right)
@@ -51,9 +78,11 @@ private struct ExpressionParser {
 
         var expressions = [first]
         while true {
-            if consume(.and) {
+            if let andToken = consumeToken(.and) {
                 if let next = parseUnary() {
                     expressions.append(next)
+                } else {
+                    reportDangling(andToken)
                 }
                 continue
             }
@@ -73,8 +102,9 @@ private struct ExpressionParser {
     }
 
     private mutating func parseUnary() -> MacFSWQueryExpression? {
-        if consume(.not) {
+        if let notToken = consumeToken(.not) {
             guard let expression = parseUnary() else {
+                reportDangling(notToken)
                 return nil
             }
             return .not(expression)
@@ -91,21 +121,37 @@ private struct ExpressionParser {
         case .leftParen:
             advance()
             let expression = parseOr()
-            _ = consume(.rightParen)
+            if consumeToken(.rightParen) == nil {
+                diagnostics.append(MacFSWQueryDiagnostic(kind: .unbalancedOpenParen, range: token.range))
+            }
             return expression
         case .word:
             advance()
-            return .predicate(predicate(for: token.text))
+            return .predicate(predicate(for: token))
         case .and, .or, .not, .rightParen:
             return nil
         }
     }
 
-    private func predicate(for word: String) -> MacFSWQueryPredicate {
-        guard let split = MacFSWQueryFieldTerm.split(word),
-              !split.fieldText.isBlank,
-              !split.valueText.isBlank,
-              let field = MacFSWQueryFieldCatalog.field(forRawKey: split.fieldText) else {
+    private mutating func predicate(for token: MacFSWQueryToken) -> MacFSWQueryPredicate {
+        let word = token.text
+        guard let split = MacFSWQueryFieldTerm.split(word), !split.fieldText.isBlank else {
+            return MacFSWQueryPredicate(field: .any, comparison: .contains, values: [word])
+        }
+
+        guard let field = MacFSWQueryFieldCatalog.field(forRawKey: split.fieldText) else {
+            diagnostics.append(MacFSWQueryDiagnostic(
+                kind: .unknownField(name: split.fieldText),
+                range: token.range
+            ))
+            return MacFSWQueryPredicate(field: .any, comparison: .contains, values: [word])
+        }
+
+        guard !split.valueText.isBlank else {
+            diagnostics.append(MacFSWQueryDiagnostic(
+                kind: .emptyValue(fieldText: split.fieldText),
+                range: token.range
+            ))
             return MacFSWQueryPredicate(field: .any, comparison: .contains, values: [word])
         }
 
@@ -122,6 +168,13 @@ private struct ExpressionParser {
             .filter { !$0.isEmpty }
     }
 
+    private mutating func reportDangling(_ token: MacFSWQueryToken) {
+        diagnostics.append(MacFSWQueryDiagnostic(
+            kind: .danglingOperator(keyword: token.text.uppercased()),
+            range: token.range
+        ))
+    }
+
     private var peek: MacFSWQueryToken? {
         index < tokens.count ? tokens[index] : nil
     }
@@ -130,12 +183,12 @@ private struct ExpressionParser {
         index += 1
     }
 
-    private mutating func consume(_ kind: MacFSWQueryToken.Kind) -> Bool {
-        guard peek?.kind == kind else {
-            return false
+    private mutating func consumeToken(_ kind: MacFSWQueryToken.Kind) -> MacFSWQueryToken? {
+        guard let token = peek, token.kind == kind else {
+            return nil
         }
         advance()
-        return true
+        return token
     }
 
     private func startsPrimary(_ kind: MacFSWQueryToken.Kind?) -> Bool {
