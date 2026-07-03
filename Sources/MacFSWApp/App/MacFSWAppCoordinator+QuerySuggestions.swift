@@ -204,6 +204,10 @@ extension MacFSWAppCoordinator {
     }
 
     func acceptSuggestion(_ suggestion: QuerySuggestion) {
+        // Undo restores what the user actually typed (the preview basis),
+        // not the last previewed candidate.
+        monitorStore.queryFillCommitBasis = monitorStore.querySuggestionPreviewBasis ?? queryText
+        monitorStore.queryFillCommitSerial += 1
         monitorStore.querySuggestionPreviewBasis = nil
         queryText = suggestion.resultText
         scheduleQueryRefresh()

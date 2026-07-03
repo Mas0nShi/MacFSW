@@ -17,6 +17,10 @@ struct CommandBarTextField: NSViewRepresentable {
     var onCancelSuggestions: () -> Void
     var onDismissSuggestions: () -> Void
     var highlight: (String) -> [QueryHighlighter.AttributeRun]
+    /// Bumped by the model when a suggestion is committed; the fill then
+    /// registers one undo step from `fillCommitBasis` to `text`.
+    var fillCommitSerial: Int
+    var fillCommitBasis: String
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -29,7 +33,8 @@ struct CommandBarTextField: NSViewRepresentable {
             onAcceptSuggestion: onAcceptSuggestion,
             onCancelSuggestions: onCancelSuggestions,
             onDismissSuggestions: onDismissSuggestions,
-            highlight: highlight
+            highlight: highlight,
+            fillCommitSerial: fillCommitSerial
         )
     }
 
@@ -60,7 +65,10 @@ struct CommandBarTextField: NSViewRepresentable {
         context.coordinator.onCancelSuggestions = onCancelSuggestions
         context.coordinator.onDismissSuggestions = onDismissSuggestions
 
-        guard field.stringValue != text else {
+        let commitRequested = context.coordinator.lastFillCommitSerial != fillCommitSerial
+        context.coordinator.lastFillCommitSerial = fillCommitSerial
+
+        guard field.stringValue != text || commitRequested else {
             context.coordinator.applyHighlight(to: field)
             return
         }
@@ -75,16 +83,29 @@ struct CommandBarTextField: NSViewRepresentable {
             field.stringValue = text
             return
         }
-        // Programmatic fills (suggestion accept, Tab preview) go through the
-        // field editor's change pipeline: shouldChangeText is where
-        // NSTextView registers undo. This component owns the entire delegate
-        // chain and nothing vetoes edits, so a veto is a bug to surface —
-        // asserted, never papered over with a side-door assignment.
-        let fullRange = NSRange(location: 0, length: (editor.string as NSString).length)
-        let accepted = editor.shouldChangeText(in: fullRange, replacementString: text)
-        assert(accepted, "command bar field editor vetoed a programmatic fill")
-        editor.replaceCharacters(in: fullRange, with: text)
-        editor.didChangeText()
+
+        if commitRequested {
+            // A committed suggestion is ONE undo step from what the user
+            // typed (the preview basis) to the committed text — Tab previews
+            // in between never entered the undo stack, so first silently
+            // restore the basis, then perform the sole undoable replacement.
+            // shouldChangeText is where NSTextView registers the undo; this
+            // component owns the entire delegate chain and nothing vetoes
+            // edits, so a veto is a bug to surface, not a state to fall
+            // back from.
+            if editor.string != fillCommitBasis {
+                editor.string = fillCommitBasis
+            }
+            let basisRange = NSRange(location: 0, length: (editor.string as NSString).length)
+            let accepted = editor.shouldChangeText(in: basisRange, replacementString: text)
+            assert(accepted, "command bar field editor vetoed a committed fill")
+            editor.replaceCharacters(in: basisRange, with: text)
+            editor.didChangeText()
+        } else {
+            // Preview and other programmatic updates are ephemeral: they
+            // replace the text without touching the undo stack.
+            editor.string = text
+        }
         editor.selectedRange = NSRange(location: (text as NSString).length, length: 0)
         context.coordinator.applyHighlight(to: field)
     }
@@ -101,6 +122,7 @@ struct CommandBarTextField: NSViewRepresentable {
         var onCancelSuggestions: () -> Void
         var onDismissSuggestions: () -> Void
         var highlight: (String) -> [QueryHighlighter.AttributeRun]
+        var lastFillCommitSerial: Int
         var isApplyingProgrammaticChange = false
         private var dismissalGeneration = 0
 
@@ -114,7 +136,8 @@ struct CommandBarTextField: NSViewRepresentable {
             onAcceptSuggestion: @escaping () -> Bool,
             onCancelSuggestions: @escaping () -> Void,
             onDismissSuggestions: @escaping () -> Void,
-            highlight: @escaping (String) -> [QueryHighlighter.AttributeRun]
+            highlight: @escaping (String) -> [QueryHighlighter.AttributeRun],
+            fillCommitSerial: Int
         ) {
             self.text = text
             self.isSuggestionListVisible = isSuggestionListVisible
@@ -126,6 +149,7 @@ struct CommandBarTextField: NSViewRepresentable {
             self.onCancelSuggestions = onCancelSuggestions
             self.onDismissSuggestions = onDismissSuggestions
             self.highlight = highlight
+            self.lastFillCommitSerial = fillCommitSerial
         }
 
         func controlTextDidChange(_ notification: Notification) {

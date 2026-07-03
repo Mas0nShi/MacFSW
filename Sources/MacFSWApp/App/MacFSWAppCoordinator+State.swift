@@ -127,6 +127,14 @@ extension MacFSWAppCoordinator {
         set { monitorStore.queryDiagnostics = newValue }
     }
 
+    var queryFillCommitSerial: Int {
+        monitorStore.queryFillCommitSerial
+    }
+
+    var queryFillCommitBasis: String {
+        monitorStore.queryFillCommitBasis
+    }
+
     var refreshTask: Task<Void, Never>? {
         get { monitorStore.refreshTask }
         set { monitorStore.refreshTask = newValue }

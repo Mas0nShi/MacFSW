@@ -78,7 +78,9 @@ struct MonitorCommandBar: View {
                     },
                     highlight: { text in
                         model.queryHighlightRuns(for: text)
-                    }
+                    },
+                    fillCommitSerial: model.queryFillCommitSerial,
+                    fillCommitBasis: model.queryFillCommitBasis
                 )
 
                 if let warning = model.queryDiagnosticSummary {
