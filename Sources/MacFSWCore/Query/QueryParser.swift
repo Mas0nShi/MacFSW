@@ -102,42 +102,18 @@ private struct ExpressionParser {
     }
 
     private func predicate(for word: String) -> MacFSWQueryPredicate {
-        guard let fieldExpression = parseFieldExpression(word),
-              let field = MacFSWQueryFieldCatalog.field(forRawKey: fieldExpression.field) else {
+        guard let split = MacFSWQueryFieldTerm.split(word),
+              !split.fieldText.isBlank,
+              !split.valueText.isBlank,
+              let field = MacFSWQueryFieldCatalog.field(forRawKey: split.fieldText) else {
             return MacFSWQueryPredicate(field: .any, comparison: .contains, values: [word])
         }
 
         return MacFSWQueryPredicate(
             field: field,
-            comparison: fieldExpression.comparison,
-            values: splitValues(fieldExpression.value)
+            comparison: split.comparison,
+            values: splitValues(split.valueText)
         )
-    }
-
-    private func parseFieldExpression(_ word: String) -> (field: String, comparison: MacFSWQueryComparison, value: String)? {
-        let operators: [(String, MacFSWQueryComparison)] = [
-            ("!=", .notEquals),
-            (">=", .greaterOrEqual),
-            ("<=", .lessOrEqual),
-            ("=", .equals),
-            (":", .contains),
-            (">", .greaterThan),
-            ("<", .lessThan),
-        ]
-
-        for (operatorText, comparison) in operators {
-            guard let range = word.range(of: operatorText) else {
-                continue
-            }
-            let field = String(word[..<range.lowerBound])
-            let value = String(word[range.upperBound...])
-            guard !field.isBlank, !value.isBlank else {
-                return nil
-            }
-            return (field, comparison, value)
-        }
-
-        return nil
     }
 
     private func splitValues(_ value: String) -> [String] {

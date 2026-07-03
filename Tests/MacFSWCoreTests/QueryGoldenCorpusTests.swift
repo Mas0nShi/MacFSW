@@ -135,23 +135,42 @@ final class QueryGoldenCorpusTests: XCTestCase {
         }
     }
 
-    /// Operator scan-order ledger. CURRENT behavior scans operators in the
-    /// fixed list order ["!=", ">=", "<=", "=", ":", ">", "<"], so a word
-    /// whose leftmost operator is not first in that list mis-splits and
-    /// degrades to full text. Phase 3 replaces this with leftmost-longest
-    /// matching and REWRITES the expectations below.
-    func testOperatorScanOrderLedger() {
+    /// Operator scan ledger: field terms split at the LEFTMOST operator
+    /// occurrence, longest operator winning at equal position. The legacy
+    /// parser scanned a fixed operator list order instead, which mis-split
+    /// words like `path:/foo=bar` (field "path:/foo" → lookup failure →
+    /// silent full-text). Recorded as behavior change #1 in
+    /// docs/query-syntax.md.
+    func testLeftmostLongestOperatorSplit() {
         XCTAssertEqual(
             MacFSWQueryParser.parse("path:/foo=bar").expression,
-            anyContains("path:/foo=bar")
+            pred(.path, .contains, ["/foo=bar"])
         )
         XCTAssertEqual(
             MacFSWQueryParser.parse("op:a=b").expression,
-            anyContains("op:a=b")
+            pred(.eventType, .contains, ["a=b"])
         )
         XCTAssertEqual(
             MacFSWQueryParser.parse("detail:key=value").expression,
-            anyContains("detail:key=value")
+            pred(.parameters, .contains, ["key=value"])
+        )
+        XCTAssertEqual(
+            MacFSWQueryParser.parse("path:a>=b").expression,
+            pred(.path, .contains, ["a>=b"])
+        )
+        // Longest-at-position keeps two-character operators intact.
+        XCTAssertEqual(
+            MacFSWQueryParser.parse("team!=ABC").expression,
+            pred(.teamID, .notEquals, ["ABC"])
+        )
+        XCTAssertEqual(
+            MacFSWQueryParser.parse("seq>=100").expression,
+            pred(.sequence, .greaterOrEqual, ["100"])
+        )
+        // A leading operator still means "no field" → full text.
+        XCTAssertEqual(
+            MacFSWQueryParser.parse(">=5").expression,
+            anyContains(">=5")
         )
     }
 
