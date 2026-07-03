@@ -122,6 +122,11 @@ extension MacFSWAppCoordinator {
         set { monitorStore.isQuerySuggestionListVisible = newValue }
     }
 
+    var queryDiagnostics: [MacFSWQueryDiagnostic] {
+        get { monitorStore.queryDiagnostics }
+        set { monitorStore.queryDiagnostics = newValue }
+    }
+
     var refreshTask: Task<Void, Never>? {
         get { monitorStore.refreshTask }
         set { monitorStore.refreshTask = newValue }

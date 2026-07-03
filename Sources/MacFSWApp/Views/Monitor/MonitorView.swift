@@ -78,6 +78,13 @@ struct MonitorCommandBar: View {
                     }
                 )
 
+                if let warning = model.queryDiagnosticSummary {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .help(warning)
+                        .transition(.opacity)
+                }
+
                 if model.isApplyingFilter {
                     ProgressView()
                         .controlSize(.small)
@@ -115,6 +122,7 @@ struct MonitorCommandBar: View {
                 }
             }
             .animation(.easeInOut(duration: 0.14), value: model.isQuerySuggestionListVisible)
+            .animation(.easeInOut(duration: 0.14), value: model.queryDiagnosticSummary == nil)
 
             Button {
                 model.recordButtonTapped()

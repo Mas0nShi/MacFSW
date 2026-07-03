@@ -2,9 +2,28 @@ import Foundation
 import MacFSWCore
 
 extension MacFSWAppCoordinator {
+    /// The single entry for parsing the command bar's text: every path that
+    /// interprets `queryText` goes through here so the diagnostics shown in
+    /// the UI can never drift from the query actually applied.
+    @discardableResult
+    func parseCurrentQueryText() -> MacFSWQueryParseResult {
+        let result = MacFSWQueryParser.parseDetailed(queryText)
+        queryDiagnostics = result.diagnostics
+        return result
+    }
+
+    var queryDiagnosticSummary: String? {
+        guard let first = queryDiagnostics.first else {
+            return nil
+        }
+        let extra = queryDiagnostics.count - 1
+        return extra > 0 ? "\(first.message) (+\(extra) more)" : first.message
+    }
+
     func queryTextEdited() {
         monitorStore.suppressSuggestionsForCurrentText = false
         monitorStore.querySuggestionPreviewBasis = nil
+        parseCurrentQueryText()
         refreshQuerySuggestions()
     }
 
@@ -102,9 +121,9 @@ extension MacFSWAppCoordinator {
 
     func submitQuery() {
         dismissQuerySuggestions()
-        let trimmed = queryText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty, MacFSWQueryParser.parse(trimmed).expression != nil {
-            queryHistoryStore.record(trimmed)
+        let result = parseCurrentQueryText()
+        if !result.query.text.isEmpty, result.query.expression != nil {
+            queryHistoryStore.record(result.query.text)
         }
         Task {
             await refreshFilteredEvents()

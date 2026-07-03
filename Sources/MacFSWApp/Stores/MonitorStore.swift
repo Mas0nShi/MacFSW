@@ -24,6 +24,7 @@ final class MonitorStore: ObservableObject {
     @Published var querySuggestions: [QuerySuggestion] = []
     @Published var querySuggestionHighlight: Int?
     @Published var isQuerySuggestionListVisible = false
+    @Published var queryDiagnostics: [MacFSWQueryDiagnostic] = []
     var suppressSuggestionsForCurrentText = false
     /// User-typed text captured when Tab previewing starts, restored on Esc.
     var querySuggestionPreviewBasis: String?
