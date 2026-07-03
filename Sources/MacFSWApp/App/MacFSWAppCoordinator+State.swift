@@ -107,6 +107,21 @@ extension MacFSWAppCoordinator {
         set { monitorStore.isApplyingFilter = newValue }
     }
 
+    var querySuggestions: [QuerySuggestion] {
+        get { monitorStore.querySuggestions }
+        set { monitorStore.querySuggestions = newValue }
+    }
+
+    var querySuggestionHighlight: Int? {
+        get { monitorStore.querySuggestionHighlight }
+        set { monitorStore.querySuggestionHighlight = newValue }
+    }
+
+    var isQuerySuggestionListVisible: Bool {
+        get { monitorStore.isQuerySuggestionListVisible }
+        set { monitorStore.isQuerySuggestionListVisible = newValue }
+    }
+
     var refreshTask: Task<Void, Never>? {
         get { monitorStore.refreshTask }
         set { monitorStore.refreshTask = newValue }

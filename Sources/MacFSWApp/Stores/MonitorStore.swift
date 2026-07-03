@@ -21,6 +21,12 @@ final class MonitorStore: ObservableObject {
     @Published var operationSummaries: [MacFSWOperationSummary] = []
     @Published var selectedProcessID: MacFSWProcessSummary.ID?
     @Published var isApplyingFilter = false
+    @Published var querySuggestions: [QuerySuggestion] = []
+    @Published var querySuggestionHighlight: Int?
+    @Published var isQuerySuggestionListVisible = false
+    var suppressSuggestionsForCurrentText = false
+    /// User-typed text captured when Tab previewing starts, restored on Esc.
+    var querySuggestionPreviewBasis: String?
 
     var refreshTask: Task<Void, Never>?
     var renderTask: Task<Void, Never>?

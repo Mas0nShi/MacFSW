@@ -594,62 +594,7 @@ private enum MacFSWQueryMatcher {
 
 private extension MacFSWQueryField {
     static func lookup(_ rawField: String) -> MacFSWQueryField? {
-        switch rawField.normalizedQueryKey {
-        case "any", "text", "q", "query":
-            return .any
-        case "event", "events", "op", "operation", "type", "eventtype":
-            return .eventType
-        case "class", "operationclass", "opclass":
-            return .operationClass
-        case "target", "targetpath", "path.target":
-            return .targetPath
-        case "source", "src", "sourcepath", "path.source":
-            return .sourcePath
-        case "path", "paths":
-            return .path
-        case "name", "process", "proc", "processname", "process.name", "pname":
-            return .processName
-        case "pid", "processid", "process.id":
-            return .pid
-        case "exe", "exec", "executable", "executablepath", "process.executable":
-            return .executable
-        case "signing", "signingid", "signing.id", "process.signing", "process.signingid":
-            return .signingID
-        case "team", "teamid", "team.id", "process.team", "process.teamid":
-            return .teamID
-        case "platform", "platformbinary", "platform.binary", "process.platform":
-            return .platformBinary
-        case "uid", "user", "userid", "user.id":
-            return .uid
-        case "gid", "group", "groupid", "group.id":
-            return .gid
-        case "uidgid", "uid/gid", "usergroup", "user.group":
-            return .uidGid
-        case "id", "uuid", "eventid", "event.id":
-            return .eventID
-        case "seq", "sequence":
-            return .sequence
-        case "timestamp", "ts", "time":
-            return .timestamp
-        case "raw", "rawtype", "raw.type":
-            return .rawType
-        case "version", "esversion", "es.version", "rawversion", "raw.version":
-            return .esVersion
-        case "flag", "flags":
-            return .flags
-        case "param", "params", "parameter", "parameters", "detail", "details", "metadata":
-            return .parameters
-        case "mutation", "mutating", "writeevent":
-            return .mutation
-        case "apple", "applecontrolled", "apple.controlled":
-            return .appleControlled
-        case "audit", "audittoken", "audit.token":
-            return .auditToken
-        case "cdhash", "codehash":
-            return .cdhash
-        default:
-            return nil
-        }
+        MacFSWQueryFieldCatalog.field(forRawKey: rawField)
     }
 }
 
@@ -781,6 +726,15 @@ private extension Bool {
     }
 }
 
+extension String {
+    var normalizedQueryKey: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+    }
+}
+
 private extension String {
     var isBlank: Bool {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -788,13 +742,6 @@ private extension String {
 
     var containsWildcard: Bool {
         contains("*") || contains("?")
-    }
-
-    var normalizedQueryKey: String {
-        trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: "_", with: "")
-            .replacingOccurrences(of: "-", with: "")
     }
 
     var queryBool: Bool? {

@@ -123,6 +123,32 @@ final class MacFSWAppTests: XCTestCase {
     }
 
     @MainActor
+    func testQueryHistoryStorePersistsDedupesAndCaps() {
+        let suiteName = "MacFSWAppTests.QueryHistory.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = QueryHistoryStore(defaults: defaults)
+        store.record("  op:rename  ")
+        store.record("path:/Library")
+        store.record("op:rename")
+        store.record("   ")
+
+        XCTAssertEqual(store.entries, ["op:rename", "path:/Library"], "re-recording moves an entry to the front; blanks are ignored")
+
+        for index in 0..<12 {
+            store.record("query-\(index)")
+        }
+        XCTAssertEqual(store.entries.count, 10)
+        XCTAssertEqual(store.entries.first, "query-11")
+
+        let reloaded = QueryHistoryStore(defaults: defaults)
+        XCTAssertEqual(reloaded.entries, store.entries)
+    }
+
+    @MainActor
     func testProcessSidebarStoreFiltersExitedProcesses() {
         let running = makeProcessSummary(id: "running", lifecycle: .running)
         let exited = makeProcessSummary(id: "exited", lifecycle: .exited)
