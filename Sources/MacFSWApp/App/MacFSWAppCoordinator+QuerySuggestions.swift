@@ -186,6 +186,9 @@ extension MacFSWAppCoordinator {
         )
         if let highlight = querySuggestionHighlight, querySuggestions.indices.contains(highlight) {
             queryText = querySuggestions[highlight].resultText
+            // The preview extends to the event table: the debounced refresh
+            // shows each candidate's filter results while cycling.
+            scheduleQueryRefresh()
         }
     }
 
@@ -225,9 +228,12 @@ extension MacFSWAppCoordinator {
     }
 
     /// Esc: restore what the user typed before Tab previewing, then close.
+    /// The filter follows the restored text the same way it followed the
+    /// preview.
     func cancelQuerySuggestions() {
         if let basis = monitorStore.querySuggestionPreviewBasis {
             queryText = basis
+            scheduleQueryRefresh()
         }
         dismissQuerySuggestions()
     }
