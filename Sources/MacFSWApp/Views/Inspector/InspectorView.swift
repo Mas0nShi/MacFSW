@@ -7,8 +7,25 @@ struct InspectorView: View {
     let isLoading: Bool
 
     @State private var showsForensics = false
+    @State private var showsEntitlements = true
+    @State private var securityPhase: InspectorSecurityPhase = .loading
+
+    private static let scrollTopAnchor = "inspector-scroll-top"
+
+    private var loadedReport: EventSecurityReport? {
+        if case .loaded(let report) = securityPhase {
+            return report
+        }
+        return nil
+    }
 
     var body: some View {
+        ScrollViewReader { scrollProxy in
+            scrollContent(resetWith: scrollProxy)
+        }
+    }
+
+    private func scrollContent(resetWith scrollProxy: ScrollViewProxy) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 if let event {
@@ -20,6 +37,7 @@ struct InspectorView: View {
                             value: event.targetPath,
                             style: .path,
                             importance: .primary,
+                            permissions: loadedReport?.targetPermissions,
                             onCopy: copy
                         )
 
@@ -29,6 +47,7 @@ struct InspectorView: View {
                                 value: sourcePath,
                                 style: .path,
                                 importance: .secondary,
+                                permissions: loadedReport?.sourcePermissions,
                                 onCopy: copy
                             )
                         }
@@ -42,11 +61,17 @@ struct InspectorView: View {
                         }
                     }
 
-                    InspectorGroup("Process Evidence", systemImage: "signature") {
-                        InspectorField("Executable", value: event.process.executablePath, style: .path, onCopy: copy)
-                        InspectorField("Signing ID", value: event.process.signingID.displayValue, onCopy: copy)
-                        if let teamID = event.process.teamID?.nonEmpty {
-                            InspectorField("Team ID", value: teamID, onCopy: copy)
+                    InspectorProcessSection(event: event, phase: securityPhase, onCopy: copy)
+
+                    if let entitlements = loadedReport?.executable?.entitlements, !entitlements.isEmpty {
+                        InspectorDisclosureGroup(
+                            "Entitlements (\(entitlements.count))",
+                            systemImage: "checkmark.seal",
+                            isExpanded: $showsEntitlements
+                        ) {
+                            ForEach(entitlements) { entitlement in
+                                InspectorEntitlementRow(entitlement: entitlement, onCopy: copy)
+                            }
                         }
                     }
 
@@ -81,13 +106,39 @@ struct InspectorView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .id(Self.scrollTopAnchor)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: event?.id) {
+            // A scroll offset carried over from a longer event would land beyond
+            // the new (still loading) content and leave the lazy stack blank.
+            scrollProxy.scrollTo(Self.scrollTopAnchor, anchor: .top)
+        }
+        .task(id: event?.id) {
+            securityPhase = .loading
+            guard let event else {
+                return
+            }
+            let report = await ExecutableSecurityInspector.shared.report(
+                executablePath: event.process.executablePath,
+                targetPath: event.targetPath,
+                sourcePath: event.sourcePath?.nonEmpty
+            )
+            guard !Task.isCancelled else {
+                return
+            }
+            securityPhase = .loaded(report)
+        }
     }
 
     private func copy(_ value: String, label: String) {
         copyToPasteboard(value)
     }
+}
+
+private enum InspectorSecurityPhase: Equatable {
+    case loading
+    case loaded(EventSecurityReport)
 }
 
 private typealias InspectorCopyAction = (_ value: String, _ label: String) -> Void
@@ -126,7 +177,6 @@ private struct InspectorHeader: View {
             HStack(spacing: 6) {
                 InspectorMetadataChip("PID \(event.process.pid)")
                 InspectorPrivilegeChip(uid: event.uid, gid: event.gid)
-                InspectorTrustChip(status: trustStatus(for: event.process))
                 Spacer(minLength: 0)
                 InspectorMetadataChip(format(timestampNS: event.timestampNS))
             }
@@ -167,6 +217,203 @@ private struct InspectorOperationBadge: View {
         let eventTitle = event.eventType.rawValue.uppercased()
         let classTitle = MacFSWOperationBucket.bucket(for: event.eventType).title
         return classTitle == eventTitle ? nil : classTitle
+    }
+}
+
+private struct InspectorProcessSection: View {
+    let event: MacFSWFileEvent
+    let phase: InspectorSecurityPhase
+    let onCopy: InspectorCopyAction
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            InspectorGroup("Process", systemImage: "cpu") {
+                InspectorRowContainer {
+                    InspectorChipFlow(spacing: 6) {
+                        ForEach(badges, id: \.self) { badge in
+                            InspectorBadgeChip(badge: badge)
+                        }
+                    }
+                }
+
+                InspectorField(
+                    "Executable",
+                    value: event.process.executablePath,
+                    style: .path,
+                    permissions: executable?.permissions,
+                    onCopy: onCopy
+                )
+                InspectorField("Signing ID", value: event.process.signingID.displayValue, onCopy: onCopy)
+                if let teamID = event.process.teamID?.nonEmpty {
+                    InspectorField("Team ID", value: teamID, onCopy: onCopy)
+                }
+            }
+
+            if executable != nil {
+                Text("Sandbox, entitlements, and permissions read from the executable currently on disk; it may differ from the binary at event time.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var executable: ExecutableSecuritySnapshot? {
+        if case .loaded(let report) = phase {
+            return report.executable
+        }
+        return nil
+    }
+
+    private var badges: [InspectorBadge] {
+        var badges = [trustStatus(for: event.process)]
+
+        guard case .loaded(let report) = phase else {
+            return badges
+        }
+        guard let executable = report.executable else {
+            badges.append(InspectorBadge(title: "Not on Disk", color: .secondary))
+            return badges
+        }
+
+        switch executable.sandbox {
+        case .sandboxed:
+            badges.append(InspectorBadge(title: "Sandboxed", color: .green))
+        case .notSandboxed:
+            badges.append(InspectorBadge(title: "Not Sandboxed", color: .secondary))
+        case .unknown:
+            badges.append(InspectorBadge(title: "Sandbox Unknown", color: .secondary))
+        }
+        if executable.hasHardenedRuntime {
+            badges.append(InspectorBadge(title: "Hardened Runtime", color: .blue))
+        }
+        if executable.permissions.isSetUserID {
+            badges.append(InspectorBadge(title: "SUID \(executable.permissions.owner)", color: .orange))
+        }
+        if executable.permissions.isSetGroupID {
+            badges.append(InspectorBadge(title: "SGID \(executable.permissions.group)", color: .orange))
+        }
+        return badges
+    }
+}
+
+private struct InspectorEntitlementRow: View {
+    let entitlement: EntitlementEntry
+    let onCopy: InspectorCopyAction
+
+    var body: some View {
+        InspectorRowContainer {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if !entitlement.items.isEmpty {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            keyText
+                            Spacer(minLength: 6)
+                            Text("\(entitlement.items.count) items")
+                                .font(.caption)
+                                .monospacedDigit()
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            ForEach(Array(entitlement.items.enumerated()), id: \.offset) { _, item in
+                                Text(item)
+                                    .font(.system(.callout, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .help(item)
+                            }
+                        }
+                        .padding(.leading, 10)
+                    } else if hasCompactValue {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            keyText
+                            Spacer(minLength: 6)
+                            valueText
+                        }
+                    } else {
+                        keyText
+                        valueText
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+                InspectorCopyButton(
+                    value: copyPayload,
+                    label: entitlement.key,
+                    onCopy: onCopy
+                )
+                .frame(width: 22)
+            }
+        }
+    }
+
+    private var copyPayload: String {
+        if entitlement.items.isEmpty {
+            return "\(entitlement.key) = \(entitlement.value)"
+        }
+        return (["\(entitlement.key) ="] + entitlement.items).joined(separator: "\n")
+    }
+
+    private var keyText: some View {
+        Text(entitlement.key)
+            .font(.system(.callout, design: .monospaced))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var valueText: some View {
+        Text(entitlement.value)
+            .font(.system(.callout, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var hasCompactValue: Bool {
+        entitlement.value.count <= 24 && !entitlement.value.contains("\n")
+    }
+}
+
+private struct InspectorChipFlow: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var width: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width
+            width = max(width, x)
+            x += spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: width, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }
 
@@ -287,6 +534,7 @@ private struct InspectorField: View {
     let value: String
     let style: InspectorValueStyle
     let importance: InspectorFieldImportance
+    let permissions: FilePermissionSnapshot?
     let onCopy: InspectorCopyAction
 
     @State private var isExpanded = false
@@ -296,12 +544,14 @@ private struct InspectorField: View {
         value: String,
         style: InspectorValueStyle = .standard,
         importance: InspectorFieldImportance = .secondary,
+        permissions: FilePermissionSnapshot? = nil,
         onCopy: @escaping InspectorCopyAction
     ) {
         self.title = title
         self.value = value
         self.style = style
         self.importance = importance
+        self.permissions = permissions
         self.onCopy = onCopy
     }
 
@@ -320,6 +570,10 @@ private struct InspectorField: View {
                         .truncationMode(.middle)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if let permissions {
+                        InspectorPermissionText(permissions: permissions)
+                    }
                 }
                 .layoutPriority(1)
 
@@ -387,6 +641,66 @@ private struct InspectorField: View {
     }
 }
 
+private struct InspectorPermissionText: View {
+    let permissions: FilePermissionSnapshot
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(styledBits)
+            Text("\(permissions.owner):\(permissions.group)")
+                .foregroundStyle(.secondary)
+            Text(permissions.octal)
+                .foregroundStyle(.tertiary)
+            if !permissions.fileFlags.isEmpty {
+                Text(styledFlags)
+            }
+        }
+        .font(.system(.caption, design: .monospaced))
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .contextMenu {
+            Button("Copy Permissions") {
+                copyToPasteboard(permissions.displayText)
+            }
+        }
+        .accessibilityLabel("Permissions \(permissions.displayText)")
+    }
+
+    private var styledBits: AttributedString {
+        let symbolic = Array(permissions.symbolic)
+        var result = AttributedString()
+
+        if symbolic[0] != "-" {
+            var typeMark = AttributedString(String(symbolic[0]))
+            typeMark.foregroundColor = .secondary
+            result += typeMark + AttributedString(" ")
+        }
+
+        for (offset, character) in symbolic.dropFirst().enumerated() {
+            if offset > 0, offset % 3 == 0 {
+                result += AttributedString(" ")
+            }
+            var bit = AttributedString(String(character))
+            bit.foregroundColor = "sStT".contains(character) ? .orange : .secondary
+            result += bit
+        }
+        return result
+    }
+
+    private var styledFlags: AttributedString {
+        var result = AttributedString()
+        for (index, flag) in permissions.fileFlags.enumerated() {
+            if index > 0 {
+                result += AttributedString(" ")
+            }
+            var name = AttributedString(flag.name)
+            name.foregroundColor = flag.isSystemEnforced ? .blue : .secondary
+            result += name
+        }
+        return result
+    }
+}
+
 private struct InspectorRowContainer<Content: View>: View {
     let content: Content
 
@@ -443,17 +757,17 @@ private struct InspectorPrivilegeChip: View {
     }
 }
 
-private struct InspectorTrustChip: View {
-    let status: InspectorTrustStatus
+private struct InspectorBadgeChip: View {
+    let badge: InspectorBadge
 
     var body: some View {
-        Text(status.title)
+        Text(badge.title)
             .font(.caption.weight(.medium))
-            .foregroundStyle(status.color)
+            .foregroundStyle(badge.color)
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(status.color.opacity(0.10), in: Capsule())
+            .background(badge.color.opacity(0.10), in: Capsule())
     }
 }
 
@@ -503,19 +817,19 @@ private struct InspectorCopyButton: View {
     }
 }
 
-private struct InspectorTrustStatus {
+private struct InspectorBadge: Hashable {
     let title: String
     let color: Color
 }
 
-private func trustStatus(for process: MacFSWProcessIdentity) -> InspectorTrustStatus {
+private func trustStatus(for process: MacFSWProcessIdentity) -> InspectorBadge {
     if process.isPlatformBinary {
-        return InspectorTrustStatus(title: "Platform", color: .green)
+        return InspectorBadge(title: "Platform", color: .green)
     }
     if process.signingID?.nonEmpty != nil || process.teamID?.nonEmpty != nil {
-        return InspectorTrustStatus(title: "Signed", color: .blue)
+        return InspectorBadge(title: "Signed", color: .blue)
     }
-    return InspectorTrustStatus(title: "Unsigned", color: .orange)
+    return InspectorBadge(title: "Unsigned", color: .orange)
 }
 
 @MainActor
