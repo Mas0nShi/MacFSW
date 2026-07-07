@@ -6,31 +6,37 @@ import XCTest
 
 @MainActor
 final class QueryHighlighterTests: XCTestCase {
-    func testFieldKeysKeywordsAndParens() {
+    func testFieldTermsGetCapsuleAndKeyRuns() {
         let source = "(op:rename OR -x) path:/tmp"
         let runs = QueryHighlighter.attributeRuns(for: MacFSWQueryParser.parseDetailed(source))
         let texts = runs.map { (source as NSString).substring(with: $0.range) }
 
-        XCTAssertEqual(texts, ["(", "op:", "OR", "-", ")", "path:"])
-        XCTAssertTrue(runs[1].attributes[.foregroundColor] as? NSColor === NSColor.controlAccentColor)
-        XCTAssertTrue(runs[2].attributes[.foregroundColor] as? NSColor === NSColor.secondaryLabelColor)
+        // Per field term: whole-term capsule run, then key+operator run.
+        XCTAssertEqual(texts, ["(", "op:rename", "op:", "OR", "-", ")", "path:/tmp", "path:"])
+
+        let capsule = runs[1]
+        XCTAssertTrue(capsule.attributes[.queryTokenBackground] as? NSColor === QueryHighlighter.tokenBackground)
+        let key = runs[2]
+        XCTAssertTrue(key.attributes[.foregroundColor] as? NSColor === NSColor.secondaryLabelColor)
+        let keyword = runs[3]
+        XCTAssertTrue(keyword.attributes[.foregroundColor] as? NSColor === NSColor.secondaryLabelColor)
+        XCTAssertNil(keyword.attributes[.queryTokenBackground], "keywords never get capsules")
     }
 
-    func testUnknownFieldGetsUnderlineRun() {
+    func testUnknownFieldGetsOrangeCapsule() {
         let source = "porcess:Safari"
         let runs = QueryHighlighter.attributeRuns(for: MacFSWQueryParser.parseDetailed(source))
 
-        XCTAssertEqual(runs.count, 1)
         XCTAssertEqual((source as NSString).substring(with: runs[0].range), "porcess:Safari")
-        XCTAssertEqual(runs[0].attributes[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
+        XCTAssertTrue(runs[0].attributes[.queryTokenBackground] as? NSColor === QueryHighlighter.unknownTokenBackground)
     }
 
-    func testQuotedValueRun() {
+    func testQuotedValueStaysInsideOneCapsule() {
         let source = "path:\"/My Folder\""
         let runs = QueryHighlighter.attributeRuns(for: MacFSWQueryParser.parseDetailed(source))
         let texts = runs.map { (source as NSString).substring(with: $0.range) }
 
-        XCTAssertEqual(texts, ["path:", "\"/My Folder\""])
+        XCTAssertEqual(texts, ["path:\"/My Folder\"", "path:"])
     }
 
     func testMultibyteValuesKeepNSRangesAligned() {
@@ -38,7 +44,7 @@ final class QueryHighlighterTests: XCTestCase {
         let runs = QueryHighlighter.attributeRuns(for: MacFSWQueryParser.parseDetailed(source))
         let texts = runs.map { (source as NSString).substring(with: $0.range) }
 
-        XCTAssertEqual(texts, ["process:", "op:"])
+        XCTAssertEqual(texts, ["process:微信", "process:", "op:rename", "op:"])
     }
 
     func testPlainTermsProduceNoRuns() {

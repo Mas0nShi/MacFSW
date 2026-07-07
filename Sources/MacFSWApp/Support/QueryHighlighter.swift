@@ -1,18 +1,27 @@
 import AppKit
 import MacFSWCore
 
-/// Maps the query front-end's positioned tokens and diagnostics to text
-/// attributes for the command bar field. Coloring is UX policy and lives in
-/// the App layer; all syntax facts come from Core (lexer, field splitter,
-/// catalog) — never a second scanner.
-///
-/// Palette is deliberately restrained and keeps orange for warnings only:
-/// field keys and operators use the accent color, keywords are semibold
-/// secondary, quoted values secondary, and unknown-field spans get an orange
-/// underline matching the diagnostics icon.
+extension NSAttributedString.Key {
+    /// Marks a recognized field term for soft-capsule background drawing by
+    /// `QueryTokenLayoutManager`. Value is the capsule's NSColor.
+    static let queryTokenBackground = NSAttributedString.Key("MacFSWQueryTokenBackground")
+}
+
+/// Maps the query front-end's positioned tokens to text attributes for the
+/// command bar field, GitHub-filter-bar style: a recognized field term
+/// (`op:rename`) stays plain editable text but carries a soft rounded
+/// capsule background for the whole term — key and operator recede to the
+/// secondary color, the value keeps the primary color, so words are never
+/// split by color alone. Unknown field terms get an orange-tinted capsule
+/// (the inline form of the diagnostics warning). Coloring is UX policy and
+/// lives in the App layer; all syntax facts come from Core (lexer, field
+/// splitter, catalog) — never a second scanner.
 @MainActor
 enum QueryHighlighter {
     typealias AttributeRun = (range: NSRange, attributes: [NSAttributedString.Key: Any])
+
+    static let tokenBackground = NSColor.labelColor.withAlphaComponent(0.07)
+    static let unknownTokenBackground = NSColor.systemOrange.withAlphaComponent(0.16)
 
     static func attributeRuns(for result: MacFSWQueryParseResult) -> [AttributeRun] {
         let source = result.tokens.source
@@ -21,17 +30,11 @@ enum QueryHighlighter {
         for token in result.tokens.tokens {
             switch token.kind {
             case .and, .or, .not:
-                runs.append((NSRange(token.range, in: source), Self.keywordAttributes))
+                runs.append((NSRange(token.range, in: source), Self.structuralAttributes))
             case .leftParen, .rightParen:
-                runs.append((NSRange(token.range, in: source), Self.parenAttributes))
+                runs.append((NSRange(token.range, in: source), Self.structuralAttributes))
             case .word:
                 runs.append(contentsOf: wordRuns(for: token, in: source))
-            }
-        }
-
-        for diagnostic in result.diagnostics {
-            if case .unknownField = diagnostic.kind, let range = diagnostic.range {
-                runs.append((NSRange(range, in: source), Self.unknownFieldAttributes))
             }
         }
 
@@ -40,46 +43,55 @@ enum QueryHighlighter {
 
     private static func wordRuns(for token: MacFSWQueryToken, in source: String) -> [AttributeRun] {
         let raw = String(source[token.range])
-        guard let split = MacFSWQueryFieldTerm.split(raw),
-              !split.fieldText.isEmpty,
-              MacFSWQueryFieldCatalog.field(forRawKey: split.fieldText) != nil else {
-            // Plain text terms (and quoted forms whose quote characters make
-            // the raw prefix unresolvable) render as values.
-            return raw.contains("\"")
-                ? [(NSRange(token.range, in: source), Self.quotedValueAttributes)]
-                : []
+        guard let split = MacFSWQueryFieldTerm.split(raw), !split.fieldText.isEmpty else {
+            return [] // plain full-text terms carry no decoration
         }
+
+        let resolved = MacFSWQueryFieldCatalog.field(forRawKey: split.fieldText) != nil
+        let capsule: [NSAttributedString.Key: Any] = [
+            .queryTokenBackground: resolved ? Self.tokenBackground : Self.unknownTokenBackground,
+        ]
 
         let keyLength = split.fieldText.count + split.operatorText.count
         let keyEnd = source.index(token.range.lowerBound, offsetBy: keyLength)
-        var runs: [AttributeRun] = [
-            (NSRange(token.range.lowerBound..<keyEnd, in: source), Self.fieldKeyAttributes)
+        return [
+            (NSRange(token.range, in: source), capsule),
+            (NSRange(token.range.lowerBound..<keyEnd, in: source), Self.fieldKeyAttributes),
         ]
-        if split.valueText.contains("\"") {
-            runs.append((NSRange(keyEnd..<token.range.upperBound, in: source), Self.quotedValueAttributes))
-        }
-        return runs
     }
 
     private static let fieldKeyAttributes: [NSAttributedString.Key: Any] = [
-        .foregroundColor: NSColor.controlAccentColor,
-    ]
-
-    private static let keywordAttributes: [NSAttributedString.Key: Any] = [
-        .foregroundColor: NSColor.secondaryLabelColor,
-        .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold),
-    ]
-
-    private static let parenAttributes: [NSAttributedString.Key: Any] = [
         .foregroundColor: NSColor.secondaryLabelColor,
     ]
 
-    private static let quotedValueAttributes: [NSAttributedString.Key: Any] = [
+    private static let structuralAttributes: [NSAttributedString.Key: Any] = [
         .foregroundColor: NSColor.secondaryLabelColor,
     ]
+}
 
-    private static let unknownFieldAttributes: [NSAttributedString.Key: Any] = [
-        .underlineStyle: NSUnderlineStyle.single.rawValue,
-        .underlineColor: NSColor.systemOrange,
-    ]
+/// TextKit 1 layout manager that draws `queryTokenBackground` spans as
+/// rounded capsules beneath the glyphs, before the default background pass
+/// (so the selection highlight still paints on top).
+final class QueryTokenLayoutManager: NSLayoutManager {
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        if let textStorage {
+            let characterRange = self.characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+            textStorage.enumerateAttribute(.queryTokenBackground, in: characterRange) { value, range, _ in
+                guard let color = value as? NSColor else {
+                    return
+                }
+                let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                guard glyphRange.length > 0,
+                      let container = textContainer(forGlyphAt: glyphRange.location, effectiveRange: nil) else {
+                    return
+                }
+                let rect = boundingRect(forGlyphRange: glyphRange, in: container)
+                    .offsetBy(dx: origin.x, dy: origin.y)
+                    .insetBy(dx: -2.5, dy: 0.5)
+                color.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+            }
+        }
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+    }
 }

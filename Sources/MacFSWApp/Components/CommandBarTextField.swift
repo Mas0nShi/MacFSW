@@ -1,10 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// Borderless AppKit text field for the monitor command bar. SwiftUI's
-/// TextField cannot intercept Tab/arrow keys while focused (the field editor
-/// consumes them), so suggestion navigation needs
-/// `control(_:textView:doCommandBy:)`.
+/// Single-line AppKit text view for the monitor command bar.
+///
+/// An NSTextView (not NSTextField) for two reasons: SwiftUI's TextField
+/// cannot intercept Tab/arrow keys while focused, and soft-capsule token
+/// backgrounds need a custom NSLayoutManager (`QueryTokenLayoutManager`),
+/// which only an owned TextKit stack provides. Key handling goes through
+/// `textView(_:doCommandBy:)`; `isFieldEditor` keeps Tab focus traversal
+/// working when the suggestion list is closed.
 struct CommandBarTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
@@ -38,23 +42,47 @@ struct CommandBarTextField: NSViewRepresentable {
         )
     }
 
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(string: text)
-        field.placeholderString = placeholder
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.font = .systemFont(ofSize: NSFont.systemFontSize)
-        field.usesSingleLineMode = true
-        field.lineBreakMode = .byClipping
-        field.cell?.sendsActionOnEndEditing = false
-        field.delegate = context.coordinator
-        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return field
+    func makeNSView(context: Context) -> NSScrollView {
+        let textStorage = NSTextStorage()
+        let layoutManager = QueryTokenLayoutManager()
+        textStorage.addLayoutManager(layoutManager)
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        )
+        textContainer.widthTracksTextView = false
+        textContainer.lineFragmentPadding = 4
+        layoutManager.addTextContainer(textContainer)
+
+        let textView = CommandBarTextView(frame: .zero, textContainer: textContainer)
+        textView.placeholderString = placeholder
+        textView.delegate = context.coordinator
+        textView.font = Coordinator.font
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.isFieldEditor = true
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 0, height: 7)
+        textView.isVerticallyResizable = false
+        textView.isHorizontallyResizable = true
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.autoresizingMask = [.height]
+        textView.typingAttributes = Coordinator.defaultAttributes
+        textView.string = text
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.verticalScrollElasticity = .none
+        scrollView.horizontalScrollElasticity = .none
+
+        context.coordinator.textView = textView
+        return scrollView
     }
 
-    func updateNSView(_ field: NSTextField, context: Context) {
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.text = $text
         context.coordinator.isSuggestionListVisible = isSuggestionListVisible
         context.coordinator.onEditingChanged = onEditingChanged
@@ -64,24 +92,22 @@ struct CommandBarTextField: NSViewRepresentable {
         context.coordinator.onAcceptSuggestion = onAcceptSuggestion
         context.coordinator.onCancelSuggestions = onCancelSuggestions
         context.coordinator.onDismissSuggestions = onDismissSuggestions
+        context.coordinator.highlight = highlight
+
+        guard let textView = context.coordinator.textView else {
+            return
+        }
 
         let commitRequested = context.coordinator.lastFillCommitSerial != fillCommitSerial
         context.coordinator.lastFillCommitSerial = fillCommitSerial
 
-        guard field.stringValue != text || commitRequested else {
-            context.coordinator.applyHighlight(to: field)
+        guard textView.string != text || commitRequested else {
+            context.coordinator.applyHighlight(to: textView)
             return
         }
         context.coordinator.isApplyingProgrammaticChange = true
         defer {
             context.coordinator.isApplyingProgrammaticChange = false
-        }
-        guard let editor = field.currentEditor() as? NSTextView else {
-            // Not being edited: no editing session exists, so there is no
-            // undo context — plain assignment is the whole mechanism here,
-            // not a degraded path.
-            field.stringValue = text
-            return
         }
 
         if commitRequested {
@@ -93,25 +119,33 @@ struct CommandBarTextField: NSViewRepresentable {
             // component owns the entire delegate chain and nothing vetoes
             // edits, so a veto is a bug to surface, not a state to fall
             // back from.
-            if editor.string != fillCommitBasis {
-                editor.string = fillCommitBasis
+            if textView.string != fillCommitBasis {
+                textView.string = fillCommitBasis
             }
-            let basisRange = NSRange(location: 0, length: (editor.string as NSString).length)
-            let accepted = editor.shouldChangeText(in: basisRange, replacementString: text)
-            assert(accepted, "command bar field editor vetoed a committed fill")
-            editor.replaceCharacters(in: basisRange, with: text)
-            editor.didChangeText()
+            let basisRange = NSRange(location: 0, length: (textView.string as NSString).length)
+            let accepted = textView.shouldChangeText(in: basisRange, replacementString: text)
+            assert(accepted, "command bar text view vetoed a committed fill")
+            textView.replaceCharacters(in: basisRange, with: text)
+            textView.didChangeText()
         } else {
             // Preview and other programmatic updates are ephemeral: they
             // replace the text without touching the undo stack.
-            editor.string = text
+            textView.string = text
         }
-        editor.selectedRange = NSRange(location: (text as NSString).length, length: 0)
-        context.coordinator.applyHighlight(to: field)
+        let end = NSRange(location: (text as NSString).length, length: 0)
+        textView.setSelectedRange(end)
+        textView.scrollRangeToVisible(end)
+        context.coordinator.applyHighlight(to: textView)
     }
 
     @MainActor
-    final class Coordinator: NSObject, NSTextFieldDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        static let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        static let defaultAttributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.labelColor,
+        ]
+
         var text: Binding<String>
         var isSuggestionListVisible: Bool
         var onEditingChanged: () -> Void
@@ -124,6 +158,7 @@ struct CommandBarTextField: NSViewRepresentable {
         var highlight: (String) -> [QueryHighlighter.AttributeRun]
         var lastFillCommitSerial: Int
         var isApplyingProgrammaticChange = false
+        weak var textView: CommandBarTextView?
         private var dismissalGeneration = 0
 
         init(
@@ -152,59 +187,42 @@ struct CommandBarTextField: NSViewRepresentable {
             self.lastFillCommitSerial = fillCommitSerial
         }
 
-        func controlTextDidChange(_ notification: Notification) {
+        func textDidChange(_ notification: Notification) {
             guard !isApplyingProgrammaticChange,
-                  let field = notification.object as? NSTextField else {
+                  let textView = notification.object as? NSTextView else {
                 return
             }
             cancelScheduledDismissal()
-            text.wrappedValue = field.stringValue
+            text.wrappedValue = textView.string
             onEditingChanged()
-            applyHighlight(to: field)
+            applyHighlight(to: textView)
         }
 
-        /// Re-applies syntax attributes to the active field editor without
-        /// replacing characters, so the caret and undo stack stay intact.
-        /// Skipped while an input method holds marked text.
-        func applyHighlight(to field: NSTextField) {
-            guard let editor = field.currentEditor() as? NSTextView,
-                  let textStorage = editor.textStorage,
-                  !editor.hasMarkedText() else {
-                return
-            }
-            let text = field.stringValue
-            let fullRange = NSRange(location: 0, length: (text as NSString).length)
-            guard textStorage.length == fullRange.length else {
-                return
-            }
-
-            isApplyingProgrammaticChange = true
-            defer {
-                isApplyingProgrammaticChange = false
-            }
-            textStorage.beginEditing()
-            textStorage.setAttributes(
-                [
-                    .foregroundColor: NSColor.labelColor,
-                    .font: field.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
-                ],
-                range: fullRange
-            )
-            for run in highlight(text) where NSMaxRange(run.range) <= fullRange.length {
-                textStorage.addAttributes(run.attributes, range: run.range)
-            }
-            textStorage.endEditing()
-            editor.typingAttributes = [
-                .foregroundColor: NSColor.labelColor,
-                .font: field.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
-            ]
-        }
-
-        func controlTextDidEndEditing(_ notification: Notification) {
+        func textDidEndEditing(_ notification: Notification) {
             scheduleDismissal()
         }
 
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        /// Single-line contract: pasted newlines become spaces.
+        func textView(
+            _ textView: NSTextView,
+            shouldChangeTextIn affectedCharRange: NSRange,
+            replacementString: String?
+        ) -> Bool {
+            guard let replacementString,
+                  replacementString.rangeOfCharacter(from: .newlines) != nil else {
+                return true
+            }
+            let sanitized = replacementString
+                .components(separatedBy: .newlines)
+                .joined(separator: " ")
+            if textView.shouldChangeText(in: affectedCharRange, replacementString: sanitized) {
+                textView.replaceCharacters(in: affectedCharRange, with: sanitized)
+                textView.didChangeText()
+            }
+            return false
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             switch commandSelector {
             case #selector(NSResponder.moveUp(_:)):
                 guard isSuggestionListVisible else {
@@ -218,7 +236,7 @@ struct CommandBarTextField: NSViewRepresentable {
                 return true
             case #selector(NSResponder.insertTab(_:)):
                 guard isSuggestionListVisible else {
-                    return false
+                    return false // isFieldEditor turns this into focus traversal
                 }
                 onCycleHighlight(1)
                 return true
@@ -235,14 +253,41 @@ struct CommandBarTextField: NSViewRepresentable {
                 onSubmit()
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
-                guard isSuggestionListVisible else {
-                    return false
+                if isSuggestionListVisible {
+                    onCancelSuggestions()
                 }
-                onCancelSuggestions()
+                // Always consumed: the NSTextView default would open the
+                // system completion popup.
                 return true
             default:
                 return false
             }
+        }
+
+        /// Re-applies syntax attributes without replacing characters, so the
+        /// caret and undo stack stay intact. Skipped while an input method
+        /// holds marked text.
+        func applyHighlight(to textView: NSTextView) {
+            guard !textView.hasMarkedText(), let textStorage = textView.textStorage else {
+                return
+            }
+            let text = textView.string
+            let fullRange = NSRange(location: 0, length: (text as NSString).length)
+            guard textStorage.length == fullRange.length else {
+                return
+            }
+
+            isApplyingProgrammaticChange = true
+            defer {
+                isApplyingProgrammaticChange = false
+            }
+            textStorage.beginEditing()
+            textStorage.setAttributes(Self.defaultAttributes, range: fullRange)
+            for run in highlight(text) where NSMaxRange(run.range) <= fullRange.length {
+                textStorage.addAttributes(run.attributes, range: run.range)
+            }
+            textStorage.endEditing()
+            textView.typingAttributes = Self.defaultAttributes
         }
 
         /// Focus loss dismisses the list after a short grace period so a
@@ -263,5 +308,26 @@ struct CommandBarTextField: NSViewRepresentable {
         func cancelScheduledDismissal() {
             dismissalGeneration += 1
         }
+    }
+}
+
+/// NSTextView with placeholder drawing; everything else is configuration.
+final class CommandBarTextView: NSTextView {
+    var placeholderString = ""
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, !placeholderString.isEmpty, !hasMarkedText() else {
+            return
+        }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
+            .foregroundColor: NSColor.placeholderTextColor,
+        ]
+        let origin = NSPoint(
+            x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 0),
+            y: textContainerInset.height
+        )
+        (placeholderString as NSString).draw(at: origin, withAttributes: attributes)
     }
 }
