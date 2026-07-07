@@ -1,7 +1,7 @@
 # MacFSW
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/dcf29085-6afc-44a5-89cf-81c2f992ddb8" alt="MacFSW monitor showing a focused macOS file-system capture session" width="100%">
+  <img src="https://github.com/user-attachments/assets/491e94a1-82a3-4967-a3b2-c862192fb6c4" alt="MacFSW monitor showing a focused macOS file-system capture session" width="100%">
 </p>
 
 <p align="center">
