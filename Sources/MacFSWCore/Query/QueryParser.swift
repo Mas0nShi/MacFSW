@@ -155,11 +155,51 @@ private struct ExpressionParser {
             return MacFSWQueryPredicate(field: .any, comparison: .contains, values: [word])
         }
 
+        let values = splitValues(split.valueText)
+        reportInvalidClosedDomainValues(values, field: field, fieldText: split.fieldText, token: token)
         return MacFSWQueryPredicate(
             field: field,
             comparison: split.comparison,
-            values: splitValues(split.valueText)
+            values: values
         )
+    }
+
+    /// Closed-domain value check: enum and boolean fields accept a finite
+    /// value set, so anything else builds a predicate that can never match.
+    /// Wildcard values are legal glob patterns and are skipped. Purely a
+    /// diagnostic — the healed predicate is built exactly as written.
+    private mutating func reportInvalidClosedDomainValues(
+        _ values: [String],
+        field: MacFSWQueryField,
+        fieldText: String,
+        token: MacFSWQueryToken
+    ) {
+        guard let descriptor = MacFSWQueryFieldCatalog.descriptor(for: field) else {
+            return
+        }
+
+        let isValid: (String) -> Bool
+        switch descriptor.valueKind {
+        case .eventType:
+            isValid = { value in
+                MacFSWEventType.allCases.contains { $0.rawValue.caseInsensitiveCompare(value) == .orderedSame }
+            }
+        case .operationClass:
+            isValid = { value in
+                MacFSWOperationClass.allCases.contains { $0.rawValue.caseInsensitiveCompare(value) == .orderedSame }
+            }
+        case .boolean:
+            isValid = { $0.queryBool != nil }
+        case .processName, .pid, .executable, .signingID, .teamID, .path, .numeric, .text:
+            return
+        }
+
+        for value in values where !value.containsWildcard && !isValid(value) {
+            diagnostics.append(MacFSWQueryDiagnostic(
+                kind: .invalidValue(fieldText: fieldText, value: value),
+                range: token.range
+            ))
+        }
     }
 
     private func splitValues(_ value: String) -> [String] {

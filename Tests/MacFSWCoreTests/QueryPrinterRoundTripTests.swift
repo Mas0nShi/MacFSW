@@ -45,6 +45,17 @@ final class QueryPrinterRoundTripTests: XCTestCase {
         }
     }
 
+    /// Out-of-domain closed-set values still round-trip structurally; they
+    /// just carry an invalidValue diagnostic.
+    func testInvalidValuesStillRoundTrip() {
+        let expression = pred(.eventType, .contains, ["xxx"])
+        let printed = MacFSWQueryPrinter.canonicalText(for: expression)
+        let detailed = MacFSWQueryParser.parseDetailed(printed)
+
+        XCTAssertEqual(detailed.query.expression, expression)
+        XCTAssertEqual(detailed.diagnostics.map(\.kind), [.invalidValue(fieldText: "op", value: "xxx")])
+    }
+
     // MARK: - Deterministic generator
 
     private struct SplitMix64 {
@@ -90,7 +101,21 @@ final class QueryPrinterRoundTripTests: XCTestCase {
             [MacFSWQueryComparison.contains, .equals, .notEquals, .greaterThan, .greaterOrEqual, .lessThan, .lessOrEqual]
         )
         let valueCount = 1 + rng.int(below: 3)
-        var values = (0..<valueCount).map { _ in makeValue(&rng) }
+        // Closed-domain fields draw from their legal value sets so canonical
+        // text stays diagnostic-free (the invalidValue check would fire on
+        // arbitrary strings — see testInvalidValuesStillRoundTrip for the
+        // structural property on out-of-domain values).
+        var values: [String]
+        switch descriptor.valueKind {
+        case .eventType:
+            values = (0..<valueCount).map { _ in rng.pick(MacFSWEventType.allCases).rawValue }
+        case .operationClass:
+            values = (0..<valueCount).map { _ in rng.pick(MacFSWOperationClass.allCases).rawValue }
+        case .boolean:
+            values = (0..<valueCount).map { _ in rng.pick(["true", "false", "yes", "no", "1", "0", "on", "off"]) }
+        case .processName, .pid, .executable, .signingID, .teamID, .path, .numeric, .text:
+            values = (0..<valueCount).map { _ in makeValue(&rng) }
+        }
         // Representational limit (documented): after a printed "<" or ">",
         // a first value starting with "=" merges into "<="/">=" — such
         // predicates cannot be written as query text.

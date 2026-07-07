@@ -8,6 +8,7 @@ public struct MacFSWQueryDiagnostic: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case unknownField(name: String)
         case emptyValue(fieldText: String)
+        case invalidValue(fieldText: String, value: String)
         case unbalancedOpenParen
         case unexpectedCloseParen
         case unterminatedQuote
@@ -31,6 +32,8 @@ public struct MacFSWQueryDiagnostic: Equatable, Sendable {
             return "Unknown field '\(name)' — matched as plain text"
         case .emptyValue(let fieldText):
             return "Field '\(fieldText)' has no value — matched as plain text"
+        case .invalidValue(let fieldText, let value):
+            return "'\(value)' is not a valid '\(fieldText)' value — this condition never matches"
         case .unbalancedOpenParen:
             return "Unclosed '(' — group runs to the end of the query"
         case .unexpectedCloseParen:

@@ -21,10 +21,22 @@ enum QueryHighlighter {
     typealias AttributeRun = (range: NSRange, attributes: [NSAttributedString.Key: Any])
 
     static let tokenBackground = NSColor.labelColor.withAlphaComponent(0.07)
-    static let unknownTokenBackground = NSColor.systemOrange.withAlphaComponent(0.16)
+    static let warningTokenBackground = NSColor.systemOrange.withAlphaComponent(0.16)
 
     static func attributeRuns(for result: MacFSWQueryParseResult) -> [AttributeRun] {
         let source = result.tokens.source
+        // Validity knowledge lives in the parser's diagnostics — the
+        // highlighter only renders it. Warning-tinted capsules cover the
+        // "never matches" classes: unknown fields and closed-domain values
+        // outside their enum/boolean sets.
+        let warningRanges = Set(result.diagnostics.compactMap { diagnostic -> Range<String.Index>? in
+            switch diagnostic.kind {
+            case .unknownField, .invalidValue:
+                return diagnostic.range
+            case .emptyValue, .unbalancedOpenParen, .unexpectedCloseParen, .unterminatedQuote, .danglingOperator:
+                return nil
+            }
+        })
         var runs: [AttributeRun] = []
 
         for token in result.tokens.tokens {
@@ -34,22 +46,29 @@ enum QueryHighlighter {
             case .leftParen, .rightParen:
                 runs.append((NSRange(token.range, in: source), Self.structuralAttributes))
             case .word:
-                runs.append(contentsOf: wordRuns(for: token, in: source))
+                runs.append(contentsOf: wordRuns(
+                    for: token,
+                    in: source,
+                    isWarning: warningRanges.contains(token.range)
+                ))
             }
         }
 
         return runs
     }
 
-    private static func wordRuns(for token: MacFSWQueryToken, in source: String) -> [AttributeRun] {
+    private static func wordRuns(
+        for token: MacFSWQueryToken,
+        in source: String,
+        isWarning: Bool
+    ) -> [AttributeRun] {
         let raw = String(source[token.range])
         guard let split = MacFSWQueryFieldTerm.split(raw), !split.fieldText.isEmpty else {
             return [] // plain full-text terms carry no decoration
         }
 
-        let resolved = MacFSWQueryFieldCatalog.field(forRawKey: split.fieldText) != nil
         let capsule: [NSAttributedString.Key: Any] = [
-            .queryTokenBackground: resolved ? Self.tokenBackground : Self.unknownTokenBackground,
+            .queryTokenBackground: isWarning ? Self.warningTokenBackground : Self.tokenBackground,
         ]
 
         let keyLength = split.fieldText.count + split.operatorText.count

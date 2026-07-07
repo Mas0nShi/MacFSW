@@ -19,6 +19,36 @@ final class QueryDiagnosticsTests: XCTestCase {
         XCTAssertEqual(sliced(result.diagnostics[0], in: "op:"), "op:")
     }
 
+    func testInvalidClosedDomainValueDiagnostics() {
+        let event = MacFSWQueryParser.parseDetailed("op:xxx")
+        XCTAssertEqual(event.diagnostics.map(\.kind), [.invalidValue(fieldText: "op", value: "xxx")])
+        XCTAssertEqual(sliced(event.diagnostics[0], in: "op:xxx"), "op:xxx")
+
+        XCTAssertEqual(
+            MacFSWQueryParser.parseDetailed("op:rename,bogus").diagnostics.map(\.kind),
+            [.invalidValue(fieldText: "op", value: "bogus")],
+            "only the invalid member of a comma list is reported"
+        )
+        XCTAssertEqual(
+            MacFSWQueryParser.parseDetailed("platform:maybe").diagnostics.map(\.kind),
+            [.invalidValue(fieldText: "platform", value: "maybe")]
+        )
+        XCTAssertEqual(
+            MacFSWQueryParser.parseDetailed("class:writing").diagnostics.map(\.kind),
+            [.invalidValue(fieldText: "class", value: "writing")]
+        )
+
+        // Legal values, case variants, wildcards, and open-domain fields
+        // produce nothing.
+        for clean in ["op:rename", "op:RENAME", "op:re*", "platform:YES", "mutation:0", "path:whatever", "pid:99999"] {
+            XCTAssertEqual(
+                MacFSWQueryParser.parseDetailed(clean).diagnostics,
+                [],
+                "input: \(clean)"
+            )
+        }
+    }
+
     func testUnterminatedQuoteDiagnostic() {
         let source = "path:\"/My Fol"
         let result = MacFSWQueryParser.parseDetailed(source)
@@ -80,6 +110,7 @@ final class QueryDiagnosticsTests: XCTestCase {
         let extraInputs = [
             "porcess:Safari", "op:", "path:\"/My Fol", "((a)", "a ) b",
             "a AND", "op:rename OR", "NOT", "NOT NOT", "bogus:",
+            "op:xxx", "platform:maybe", "class:writing", "op:rename,bogus",
         ]
         for input in QueryGoldenCorpusTests.corpus.map(\.input) + extraInputs {
             let detailed = MacFSWQueryParser.parseDetailed(input)

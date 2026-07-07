@@ -493,9 +493,7 @@ extension String {
     var isBlank: Bool {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-}
 
-private extension String {
     var containsWildcard: Bool {
         contains("*") || contains("?")
     }

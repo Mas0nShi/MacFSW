@@ -70,6 +70,7 @@ shows an orange warning icon whose tooltip carries the messages.
 |---|---|---|
 | Unknown field key (`porcess:x`) | full-text contains of the whole word | `unknownField` |
 | Known field, empty value (`op:`) | full-text contains of the whole word | `emptyValue` |
+| Closed-domain value outside its set (`op:xxx`, `platform:maybe`) | predicate built as written — it never matches | `invalidValue` |
 | Unclosed `(` | group runs to the end | `unbalancedOpenParen` |
 | Stray `)` | it and any following input are ignored | `unexpectedCloseParen` |
 | Unclosed `"` | quote runs to the end | `unterminatedQuote` |

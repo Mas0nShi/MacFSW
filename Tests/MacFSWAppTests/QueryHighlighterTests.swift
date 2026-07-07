@@ -28,7 +28,16 @@ final class QueryHighlighterTests: XCTestCase {
         let runs = QueryHighlighter.attributeRuns(for: MacFSWQueryParser.parseDetailed(source))
 
         XCTAssertEqual((source as NSString).substring(with: runs[0].range), "porcess:Safari")
-        XCTAssertTrue(runs[0].attributes[.queryTokenBackground] as? NSColor === QueryHighlighter.unknownTokenBackground)
+        XCTAssertTrue(runs[0].attributes[.queryTokenBackground] as? NSColor === QueryHighlighter.warningTokenBackground)
+    }
+
+    func testInvalidClosedDomainValueGetsOrangeCapsule() {
+        let source = "op:xxx path:/tmp"
+        let runs = QueryHighlighter.attributeRuns(for: MacFSWQueryParser.parseDetailed(source))
+
+        XCTAssertEqual((source as NSString).substring(with: runs[0].range), "op:xxx")
+        XCTAssertTrue(runs[0].attributes[.queryTokenBackground] as? NSColor === QueryHighlighter.warningTokenBackground)
+        XCTAssertTrue(runs[2].attributes[.queryTokenBackground] as? NSColor === QueryHighlighter.tokenBackground, "the valid term keeps the normal capsule")
     }
 
     func testQuotedValueStaysInsideOneCapsule() {
