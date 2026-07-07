@@ -154,42 +154,47 @@ extension MacFSWAppCoordinator {
             monitorStore.suppressSuggestionsForCurrentText = false
             refreshQuerySuggestions()
             if isQuerySuggestionListVisible {
-                querySuggestionHighlight = QuerySuggestionEngine.nextHighlight(
+                previewSuggestion(at: QuerySuggestionEngine.nextHighlight(
                     current: nil,
                     delta: delta,
                     count: querySuggestions.count
-                )
+                ))
             }
             return
         }
-        querySuggestionHighlight = QuerySuggestionEngine.nextHighlight(
+        previewSuggestion(at: QuerySuggestionEngine.nextHighlight(
             current: querySuggestionHighlight,
             delta: delta,
             count: querySuggestions.count
-        )
+        ))
     }
 
-    /// Tab previews candidates in place: the field shows what confirming
-    /// would produce, computed against the text the user actually typed.
-    /// The suggestion list stays frozen on that basis while cycling.
     func cycleSuggestionHighlight(by delta: Int) {
         guard isQuerySuggestionListVisible, !querySuggestions.isEmpty else {
+            return
+        }
+        previewSuggestion(at: QuerySuggestionEngine.cycledHighlight(
+            current: querySuggestionHighlight,
+            delta: delta,
+            count: querySuggestions.count
+        ))
+    }
+
+    /// Keyboard navigation (Tab and arrows alike) highlights AND previews in
+    /// one motion: the field shows what confirming would produce, computed
+    /// against the text the user actually typed; the suggestion list stays
+    /// frozen on that basis, and the debounced refresh extends the preview
+    /// to the event table.
+    private func previewSuggestion(at index: Int?) {
+        querySuggestionHighlight = index
+        guard let index, querySuggestions.indices.contains(index) else {
             return
         }
         if monitorStore.querySuggestionPreviewBasis == nil {
             monitorStore.querySuggestionPreviewBasis = queryText
         }
-        querySuggestionHighlight = QuerySuggestionEngine.cycledHighlight(
-            current: querySuggestionHighlight,
-            delta: delta,
-            count: querySuggestions.count
-        )
-        if let highlight = querySuggestionHighlight, querySuggestions.indices.contains(highlight) {
-            queryText = querySuggestions[highlight].resultText
-            // The preview extends to the event table: the debounced refresh
-            // shows each candidate's filter results while cycling.
-            scheduleQueryRefresh()
-        }
+        queryText = querySuggestions[index].resultText
+        scheduleQueryRefresh()
     }
 
     @discardableResult

@@ -47,7 +47,7 @@ struct QuerySuggestionListView: View {
             Divider()
 
             HStack(spacing: 12) {
-                Text("⇥ Preview next")
+                Text("⇥ ↑↓ Preview")
                 Text("↩ Confirm / Run")
                 Text("esc Revert")
                 Spacer()
