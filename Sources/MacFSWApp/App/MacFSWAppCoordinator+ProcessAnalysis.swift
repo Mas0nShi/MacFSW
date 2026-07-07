@@ -93,7 +93,8 @@ extension MacFSWAppCoordinator {
     }
 
     func applySavedQuery(_ saved: MacFSWSavedQuery) {
-        queryText = saved.query.text
+        dismissQuerySuggestions()
+        setQueryTextRegisteringUndo(saved.query.text)
         Task {
             var query = saved.query
             query.limit = 0

@@ -21,10 +21,15 @@ struct CommandBarTextField: NSViewRepresentable {
     var onCancelSuggestions: () -> Void
     var onDismissSuggestions: () -> Void
     var highlight: (String) -> [QueryHighlighter.AttributeRun]
-    /// Bumped by the model when a suggestion is committed; the fill then
+    /// Bumped by the model when a suggestion is committed or the query is
+    /// programmatically replaced (clear, saved query); the fill then
     /// registers one undo step from `fillCommitBasis` to `text`.
     var fillCommitSerial: Int
     var fillCommitBasis: String
+    /// Non-nil while a Tab/arrow preview is active: the text the user
+    /// actually typed. Typing or focus loss makes the preview permanent, at
+    /// which point the basis→preview step must be registered for undo.
+    var previewBasis: String?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -93,6 +98,7 @@ struct CommandBarTextField: NSViewRepresentable {
         context.coordinator.onCancelSuggestions = onCancelSuggestions
         context.coordinator.onDismissSuggestions = onDismissSuggestions
         context.coordinator.highlight = highlight
+        context.coordinator.previewBasis = previewBasis
 
         guard let textView = context.coordinator.textView else {
             return
@@ -111,25 +117,21 @@ struct CommandBarTextField: NSViewRepresentable {
         }
 
         if commitRequested {
-            // A committed suggestion is ONE undo step from what the user
-            // typed (the preview basis) to the committed text — Tab previews
-            // in between never entered the undo stack, so first silently
-            // restore the basis, then perform the sole undoable replacement.
-            // shouldChangeText is where NSTextView registers the undo; this
-            // component owns the entire delegate chain and nothing vetoes
-            // edits, so a veto is a bug to surface, not a state to fall
-            // back from.
+            // A committed replacement (suggestion accept, clear, saved
+            // query) is ONE undo step from `fillCommitBasis` (what the user
+            // typed) to the new text — Tab previews in between never entered
+            // the undo stack, so first silently restore the basis, then
+            // register the sole undoable swap.
             if textView.string != fillCommitBasis {
                 textView.string = fillCommitBasis
             }
-            let basisRange = NSRange(location: 0, length: (textView.string as NSString).length)
-            let accepted = textView.shouldChangeText(in: basisRange, replacementString: text)
-            assert(accepted, "command bar text view vetoed a committed fill")
-            textView.replaceCharacters(in: basisRange, with: text)
-            textView.didChangeText()
+            context.coordinator.registerSwapUndo(restoring: fillCommitBasis)
+            textView.string = text
         } else {
-            // Preview and other programmatic updates are ephemeral: they
-            // replace the text without touching the undo stack.
+            // Tab/arrow previews are transient BY CONSTRUCTION: every way a
+            // preview can end (Esc revert, Enter commit, typing, focus loss)
+            // either restores this text or registers the swap — so applying
+            // it without undo registration can never strand the timeline.
             textView.string = text
         }
         let end = NSRange(location: (text as NSString).length, length: 0)
@@ -157,6 +159,7 @@ struct CommandBarTextField: NSViewRepresentable {
         var onDismissSuggestions: () -> Void
         var highlight: (String) -> [QueryHighlighter.AttributeRun]
         var lastFillCommitSerial: Int
+        var previewBasis: String?
         var isApplyingProgrammaticChange = false
         weak var textView: CommandBarTextView?
         private var dismissalGeneration = 0
@@ -199,7 +202,62 @@ struct CommandBarTextField: NSViewRepresentable {
         }
 
         func textDidEndEditing(_ notification: Notification) {
+            commitActivePreviewIfNeeded()
             scheduleDismissal()
+        }
+
+        // MARK: - Undo timeline
+
+        // Invariant: every text mutation that PERSISTS is exactly one
+        // registered undo step; unregistered mutations (previews) must end
+        // net-zero or get registered here the moment they become permanent.
+        // An unregistered persistent change would misalign the ranges of
+        // every earlier undo record.
+
+        /// Registers one undoable swap that restores `oldText`. Replay
+        /// re-registers symmetrically (for redo) and flows through the same
+        /// binding/model sync as a user edit.
+        func registerSwapUndo(restoring oldText: String) {
+            guard let textView, let undoManager = textView.undoManager else {
+                return
+            }
+            textView.breakUndoCoalescing()
+            undoManager.registerUndo(withTarget: self) { coordinator in
+                MainActor.assumeIsolated {
+                    coordinator.replaySwap(restoring: oldText)
+                }
+            }
+        }
+
+        private func replaySwap(restoring oldText: String) {
+            guard let textView, textView.string != oldText else {
+                return
+            }
+            registerSwapUndo(restoring: textView.string)
+            isApplyingProgrammaticChange = true
+            textView.string = oldText
+            let end = NSRange(location: (oldText as NSString).length, length: 0)
+            textView.setSelectedRange(end)
+            textView.scrollRangeToVisible(end)
+            isApplyingProgrammaticChange = false
+            previewBasis = nil
+            text.wrappedValue = oldText
+            onEditingChanged()
+            applyHighlight(to: textView)
+        }
+
+        /// Typing or focus loss during a Tab/arrow preview makes the
+        /// previewed text permanent: register the basis→preview step before
+        /// anything else lands on the timeline.
+        private func commitActivePreviewIfNeeded() {
+            guard let basis = previewBasis else {
+                return
+            }
+            previewBasis = nil
+            guard let textView, textView.string != basis else {
+                return
+            }
+            registerSwapUndo(restoring: basis)
         }
 
         /// Single-line contract: pasted newlines become spaces.
@@ -208,6 +266,7 @@ struct CommandBarTextField: NSViewRepresentable {
             shouldChangeTextIn affectedCharRange: NSRange,
             replacementString: String?
         ) -> Bool {
+            commitActivePreviewIfNeeded()
             guard let replacementString,
                   replacementString.rangeOfCharacter(from: .newlines) != nil else {
                 return true

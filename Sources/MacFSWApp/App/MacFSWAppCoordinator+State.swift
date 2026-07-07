@@ -135,6 +135,10 @@ extension MacFSWAppCoordinator {
         monitorStore.queryFillCommitBasis
     }
 
+    var querySuggestionPreviewBasis: String? {
+        monitorStore.querySuggestionPreviewBasis
+    }
+
     var refreshTask: Task<Void, Never>? {
         get { monitorStore.refreshTask }
         set { monitorStore.refreshTask = newValue }
