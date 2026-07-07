@@ -108,6 +108,7 @@ struct CommandBarTextField: NSViewRepresentable {
         context.coordinator.lastFillCommitSerial = fillCommitSerial
 
         guard textView.string != text || commitRequested else {
+            context.coordinator.syncPreviewRegistration(basis: previewBasis)
             context.coordinator.applyHighlight(to: textView)
             return
         }
@@ -119,24 +120,25 @@ struct CommandBarTextField: NSViewRepresentable {
         if commitRequested {
             // A committed replacement (suggestion accept, clear, saved
             // query) is ONE undo step from `fillCommitBasis` (what the user
-            // typed) to the new text — Tab previews in between never entered
-            // the undo stack, so first silently restore the basis, then
-            // register the sole undoable swap.
+            // typed) to the new text. Retract the retractable preview
+            // registration, silently restore the basis, then register the
+            // sole permanent swap.
+            context.coordinator.retirePreviewRegistration()
             if textView.string != fillCommitBasis {
                 textView.string = fillCommitBasis
             }
             context.coordinator.registerSwapUndo(restoring: fillCommitBasis)
             textView.string = text
         } else {
-            // Tab/arrow previews are transient BY CONSTRUCTION: every way a
-            // preview can end (Esc revert, Enter commit, typing, focus loss)
-            // either restores this text or registers the swap — so applying
-            // it without undo registration can never strand the timeline.
             textView.string = text
         }
         let end = NSRange(location: (text as NSString).length, length: 0)
         textView.setSelectedRange(end)
         textView.scrollRangeToVisible(end)
+        // Previews sit on the undo stack too — as a single retractable
+        // registration owned by a token — so Cmd+Z during a preview cancels
+        // the preview instead of replaying stale records against it.
+        context.coordinator.syncPreviewRegistration(basis: previewBasis)
         context.coordinator.applyHighlight(to: textView)
     }
 
@@ -162,6 +164,7 @@ struct CommandBarTextField: NSViewRepresentable {
         var previewBasis: String?
         var isApplyingProgrammaticChange = false
         weak var textView: CommandBarTextView?
+        private var previewToken: PreviewUndoToken?
         private var dismissalGeneration = 0
 
         init(
@@ -247,17 +250,79 @@ struct CommandBarTextField: NSViewRepresentable {
         }
 
         /// Typing or focus loss during a Tab/arrow preview makes the
-        /// previewed text permanent: register the basis→preview step before
-        /// anything else lands on the timeline.
+        /// previewed text permanent: swap the retractable preview
+        /// registration for a permanent one before anything else lands on
+        /// the timeline.
         private func commitActivePreviewIfNeeded() {
             guard let basis = previewBasis else {
                 return
             }
             previewBasis = nil
+            retirePreviewRegistration()
             guard let textView, textView.string != basis else {
                 return
             }
             registerSwapUndo(restoring: basis)
+        }
+
+        /// While a preview is active, exactly one retractable undo action —
+        /// owned by a disposable token — sits on top of the stack, restoring
+        /// the typed basis. Each preview step re-registers it; every preview
+        /// exit either retires it (Esc, dismiss) or converts it into a
+        /// permanent registration (typing, focus loss, commit).
+        func syncPreviewRegistration(basis: String?) {
+            guard let basis, let textView, textView.string != basis else {
+                retirePreviewRegistration()
+                return
+            }
+            guard let undoManager = textView.undoManager else {
+                return
+            }
+            if let token = previewToken {
+                undoManager.removeAllActions(withTarget: token)
+            } else {
+                previewToken = PreviewUndoToken()
+                previewToken?.owner = self
+                textView.breakUndoCoalescing()
+            }
+            guard let token = previewToken else {
+                return
+            }
+            undoManager.registerUndo(withTarget: token) { token in
+                MainActor.assumeIsolated {
+                    token.owner?.performPreviewUndo(restoring: basis)
+                }
+            }
+        }
+
+        func retirePreviewRegistration() {
+            guard let token = previewToken else {
+                return
+            }
+            previewToken = nil
+            if let undoManager = textView?.undoManager {
+                undoManager.removeAllActions(withTarget: token)
+            }
+        }
+
+        /// Cmd+Z during an active preview: cancel the preview back to the
+        /// typed basis. Deliberately registers no redo — re-browsing a
+        /// cancelled preview is not a meaningful redo.
+        private func performPreviewUndo(restoring basis: String) {
+            previewToken = nil
+            guard let textView else {
+                return
+            }
+            isApplyingProgrammaticChange = true
+            textView.string = basis
+            let end = NSRange(location: (basis as NSString).length, length: 0)
+            textView.setSelectedRange(end)
+            textView.scrollRangeToVisible(end)
+            isApplyingProgrammaticChange = false
+            previewBasis = nil
+            text.wrappedValue = basis
+            onEditingChanged()
+            applyHighlight(to: textView)
         }
 
         /// Single-line contract: pasted newlines become spaces.
@@ -368,6 +433,12 @@ struct CommandBarTextField: NSViewRepresentable {
             dismissalGeneration += 1
         }
     }
+}
+
+/// Owns the retractable undo registration of an active suggestion preview;
+/// disposing the token (removeAllActions) retracts exactly that one action.
+private final class PreviewUndoToken: NSObject {
+    weak var owner: CommandBarTextField.Coordinator?
 }
 
 /// NSTextView with placeholder drawing; everything else is configuration.
