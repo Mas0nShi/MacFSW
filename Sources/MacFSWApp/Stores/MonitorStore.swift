@@ -21,6 +21,28 @@ final class MonitorStore: ObservableObject {
     @Published var operationSummaries: [MacFSWOperationSummary] = []
     @Published var selectedProcessID: MacFSWProcessSummary.ID?
     @Published var isApplyingFilter = false
+    @Published var querySuggestions: [QuerySuggestion] = []
+    @Published var querySuggestionHighlight: Int?
+    @Published var isQuerySuggestionListVisible = false
+    @Published var queryDiagnostics: [MacFSWQueryDiagnostic] = []
+    /// Last front-end parse of `queryText`; lets suggestions, diagnostics,
+    /// and highlighting share one parse per keystroke.
+    var lastQueryParse: MacFSWQueryParseResult?
+    var suppressSuggestionsForCurrentText = false
+    /// User-typed text captured when Tab previewing starts, restored on Esc.
+    var querySuggestionPreviewBasis: String?
+    /// Bumped when a suggestion is COMMITTED (accept, not preview): the
+    /// field registers exactly one undo step, from `queryFillCommitBasis`
+    /// (what the user typed) to the committed text. Tab previews are
+    /// ephemeral and never enter the undo stack.
+    @Published var queryFillCommitSerial = 0
+    var queryFillCommitBasis = ""
+    /// Faceted value candidates for the current (prefix conditions, field)
+    /// pair; single-entry cache scoped to one suggestion session.
+    var facetValues: [(value: String, detail: String?)] = []
+    var facetValueKey: String?
+    var facetRequestKey: String?
+    var facetTask: Task<Void, Never>?
 
     var refreshTask: Task<Void, Never>?
     var renderTask: Task<Void, Never>?

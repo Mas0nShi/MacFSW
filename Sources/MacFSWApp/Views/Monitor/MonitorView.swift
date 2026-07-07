@@ -6,6 +6,7 @@ struct MonitorView: View {
     var body: some View {
         VStack(spacing: 0) {
             MonitorCommandBar()
+                .zIndex(1)
             EventTableView(
                 rowCount: model.visibleEventCount,
                 cacheVersion: model.rowCacheVersion,
@@ -49,20 +50,52 @@ struct MonitorCommandBar: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
 
-                TextField("(op:rename OR op:unlink) path:/Library NOT platform:true", text: $model.queryText)
-                    .textFieldStyle(.plain)
-                    .onSubmit {
-                        Task { await model.refreshFilteredEvents() }
-                    }
-                    .onChange(of: model.queryText) {
+                CommandBarTextField(
+                    text: $model.queryText,
+                    placeholder: "(op:rename OR op:unlink) path:/Library NOT platform:true",
+                    isSuggestionListVisible: model.isQuerySuggestionListVisible,
+                    onEditingChanged: {
+                        model.queryTextEdited()
                         model.scheduleQueryRefresh()
-                    }
+                    },
+                    onSubmit: {
+                        model.submitQuery()
+                    },
+                    onMoveHighlight: { delta in
+                        model.moveSuggestionHighlight(by: delta)
+                    },
+                    onCycleHighlight: { delta in
+                        model.cycleSuggestionHighlight(by: delta)
+                    },
+                    onAcceptSuggestion: {
+                        model.acceptHighlightedSuggestion()
+                    },
+                    onCancelSuggestions: {
+                        model.cancelQuerySuggestions()
+                    },
+                    onDismissSuggestions: {
+                        model.dismissQuerySuggestions()
+                    },
+                    highlight: { text in
+                        model.queryHighlightRuns(for: text)
+                    },
+                    fillCommitSerial: model.queryFillCommitSerial,
+                    fillCommitBasis: model.queryFillCommitBasis
+                )
+
+                if let warning = model.queryDiagnosticSummary {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .help(warning)
+                        .transition(.opacity)
+                }
 
                 if model.isApplyingFilter {
                     ProgressView()
                         .controlSize(.small)
                 } else if !model.queryText.isEmpty {
                     Button {
+                        model.dismissQuerySuggestions()
                         model.queryText = ""
                         Task { await model.refreshFilteredEvents() }
                     } label: {
@@ -76,6 +109,25 @@ struct MonitorCommandBar: View {
             .frame(height: 30)
             .frame(maxWidth: .infinity)
             .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(alignment: .topLeading) {
+                if model.isQuerySuggestionListVisible {
+                    QuerySuggestionListView(
+                        suggestions: model.querySuggestions,
+                        highlightedIndex: model.querySuggestionHighlight,
+                        onSelect: { suggestion in
+                            model.acceptSuggestion(suggestion)
+                        },
+                        onHighlight: { index in
+                            model.querySuggestionHighlight = index
+                        }
+                    )
+                    .frame(maxWidth: 520, alignment: .topLeading)
+                    .offset(y: 36)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.14), value: model.isQuerySuggestionListVisible)
+            .animation(.easeInOut(duration: 0.14), value: model.queryDiagnosticSummary == nil)
 
             Button {
                 model.recordButtonTapped()

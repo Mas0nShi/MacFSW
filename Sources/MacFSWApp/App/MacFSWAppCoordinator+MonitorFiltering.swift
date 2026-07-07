@@ -11,7 +11,13 @@ extension MacFSWAppCoordinator {
         using queryOverride: MacFSWEventQuery?,
         allowAutoSelection: Bool = false
     ) async {
-        let parsedQuery = queryOverride ?? MacFSWQueryParser.parse(queryText)
+        let parsedQuery: MacFSWEventQuery
+        if let queryOverride {
+            parseCurrentQueryText()
+            parsedQuery = queryOverride
+        } else {
+            parsedQuery = parseCurrentQueryText().query
+        }
         let query = queryWithSelectedProcessFilter(parsedQuery)
         filterTask?.cancel()
         let generation = beginFilterRefresh()

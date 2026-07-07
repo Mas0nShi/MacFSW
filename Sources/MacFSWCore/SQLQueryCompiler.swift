@@ -339,6 +339,26 @@ enum MacFSWSQLQueryCompiler {
         simple("pid = ?", MacFSWSQLValue(identity.pid))
     }
 
+    /// Column used for faceted distinct-value queries. Only fields whose
+    /// values are dynamic capture data are facetable; enum/boolean/free-text
+    /// fields return nil.
+    static func facetColumn(for field: MacFSWQueryField) -> String? {
+        switch field {
+        case .processName:
+            return "processName"
+        case .pid:
+            return "pidText"
+        case .executable:
+            return "executablePath"
+        case .signingID:
+            return "signingID"
+        case .teamID:
+            return "teamID"
+        default:
+            return nil
+        }
+    }
+
     private static func columns(for field: MacFSWQueryField) -> [String] {
         switch field {
         case .any:

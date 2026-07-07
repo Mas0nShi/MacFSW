@@ -10,6 +10,27 @@ MacFSW is intentionally Swift-only:
 
 The System Extension must remain a minimal sensor. It should not persist data, manage Sessions, or implement product search.
 
+### Query subsystem layering
+
+The query language lives in `Sources/MacFSWCore/Query/` as a layered front-end
+over a frozen semantic core:
+
+- `QueryLexer` is the single positioned tokenizer; `QueryFieldTerm` is the
+  single field/operator splitter. The parser, the completion cursor context
+  (`QueryCursorContext`), and any future tooling (syntax highlighting,
+  mid-cursor completion) consume these — never a second implementation.
+- `QueryParser.parseDetailed` returns the query plus healing diagnostics;
+  `parse` is a thin wrapper with identical output. Diagnostics name every
+  lenient-heal path and never change interpretation.
+- `QueryModel` holds the semantic AST (`MacFSWQueryExpression`) and the
+  per-event matcher. The AST's Codable encoding is a **frozen wire format**
+  (session archives persist saved queries as JSON): no case renames, no
+  associated-value label changes, no new cases; new front-end types are
+  deliberately not Codable. A fixture test guards the encoding.
+- `QueryPrinter` renders canonical text; the round-trip property
+  `parse ∘ print == identity` plus a golden corpus are the executable
+  grammar specification. See [Query Syntax](query-syntax.md).
+
 ## App Target Structure
 
 `MacFSWApp` is organized as a staged MVVM/Coordinator app:

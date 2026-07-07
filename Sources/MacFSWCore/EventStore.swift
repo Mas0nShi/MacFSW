@@ -131,6 +131,19 @@ public struct MacFSWOperationEventSummary: Identifiable, Codable, Equatable, Has
     }
 }
 
+/// A distinct value of one queryable field within a filtered event set,
+/// with the number of matching events — the data behind faceted value
+/// suggestions ("only processes that actually have write events").
+public struct MacFSWFacetValue: Equatable, Sendable {
+    public let value: String
+    public let count: Int
+
+    public init(value: String, count: Int) {
+        self.value = value
+        self.count = count
+    }
+}
+
 public protocol MacFSWEventStore: Sendable {
     func appendReturningEvents(_ incoming: [MacFSWFileEvent]) async throws -> MacFSWEventAppendResult
     func clear() async throws
@@ -152,4 +165,9 @@ public protocol MacFSWEventStore: Sendable {
         sortOrder: MacFSWEventSortOrder
     ) async throws -> Int?
     func snapshot() async throws -> [MacFSWFileEvent]
+    func distinctValues(
+        for field: MacFSWQueryField,
+        matching query: MacFSWEventQuery,
+        limit: Int
+    ) async throws -> [MacFSWFacetValue]
 }

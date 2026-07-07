@@ -155,6 +155,44 @@ public actor MacFSWInMemoryEventStore {
         events
     }
 
+    public func distinctValues(
+        for field: MacFSWQueryField,
+        matching query: MacFSWEventQuery,
+        limit: Int
+    ) -> [MacFSWFacetValue] {
+        guard limit > 0 else {
+            return []
+        }
+        var counts: [String: Int] = [:]
+        for event in events where query.matches(event) {
+            let value: String
+            switch field {
+            case .processName:
+                value = event.process.processName
+            case .pid:
+                value = String(event.process.pid)
+            case .executable:
+                value = event.process.executablePath
+            case .signingID:
+                value = event.process.signingID ?? ""
+            case .teamID:
+                value = event.process.teamID ?? ""
+            default:
+                return []
+            }
+            if !value.isEmpty {
+                counts[value, default: 0] += 1
+            }
+        }
+        var values = counts.map { (value: String, count: Int) in
+            MacFSWFacetValue(value: value, count: count)
+        }
+        values.sort { left, right in
+            left.count == right.count ? left.value < right.value : left.count > right.count
+        }
+        return Array(values.prefix(limit))
+    }
+
     public func count() -> Int {
         events.count
     }

@@ -21,3 +21,4 @@ DerivedData/
 *.sqlite-shm
 *.macfsw-session
 *.macfsw-evidence
+.claude/

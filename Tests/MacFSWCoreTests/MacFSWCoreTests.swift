@@ -547,4 +547,153 @@ final class MacFSWCoreTests: XCTestCase {
             XCTAssertTrue(error is MacFSWArchiveError)
         }
     }
+
+    func testSQLiteDistinctValuesFacetByQuery() async throws {
+        let store = try MacFSWSQLiteEventStore.temporary()
+        let safari = MacFSWProcessIdentity(
+            pid: 100,
+            auditToken: "safari",
+            executablePath: "/Applications/Safari.app/Contents/MacOS/Safari",
+            processName: "Safari",
+            teamID: "APPLE1"
+        )
+        let installer = MacFSWProcessIdentity(
+            pid: 200,
+            auditToken: "installer",
+            executablePath: "/usr/sbin/installer",
+            processName: "installer",
+            teamID: "APPLE2"
+        )
+        _ = try await store.appendReturningEvents([
+            MacFSWFileEvent(eventType: .write, process: safari, targetPath: "/tmp/a"),
+            MacFSWFileEvent(eventType: .write, process: safari, targetPath: "/tmp/b"),
+            MacFSWFileEvent(eventType: .rename, process: installer, targetPath: "/tmp/c", sourcePath: "/tmp/d"),
+        ])
+
+        let writeProcesses = try await store.distinctValues(
+            for: .processName,
+            matching: MacFSWQueryParser.parse("op:write"),
+            limit: 50
+        )
+        XCTAssertEqual(writeProcesses, [MacFSWFacetValue(value: "Safari", count: 2)])
+
+        let allProcesses = try await store.distinctValues(
+            for: .processName,
+            matching: MacFSWQueryParser.parse(""),
+            limit: 50
+        )
+        XCTAssertEqual(
+            allProcesses,
+            [
+                MacFSWFacetValue(value: "Safari", count: 2),
+                MacFSWFacetValue(value: "installer", count: 1),
+            ]
+        )
+
+        let renameTeams = try await store.distinctValues(
+            for: .teamID,
+            matching: MacFSWQueryParser.parse("op:rename"),
+            limit: 50
+        )
+        XCTAssertEqual(renameTeams, [MacFSWFacetValue(value: "APPLE2", count: 1)])
+
+        let nonFacetable = try await store.distinctValues(
+            for: .eventType,
+            matching: MacFSWQueryParser.parse(""),
+            limit: 50
+        )
+        XCTAssertEqual(nonFacetable, [])
+    }
+
+    func testInMemoryDistinctValuesFacetByQuery() async {
+        let store = MacFSWInMemoryEventStore(maxEvents: 1_000)
+        let tester = MacFSWProcessIdentity(
+            pid: 42,
+            auditToken: "test",
+            executablePath: "/usr/libexec/tester",
+            processName: "tester"
+        )
+        let other = MacFSWProcessIdentity(
+            pid: 43,
+            auditToken: "other",
+            executablePath: "/usr/libexec/other",
+            processName: "other"
+        )
+        _ = await store.append([
+            MacFSWFileEvent(eventType: .write, process: tester, targetPath: "/tmp/a"),
+            MacFSWFileEvent(eventType: .unlink, process: other, targetPath: "/tmp/b"),
+        ])
+
+        let writers = await store.distinctValues(
+            for: .processName,
+            matching: MacFSWQueryParser.parse("op:write"),
+            limit: 10
+        )
+        XCTAssertEqual(writers, [MacFSWFacetValue(value: "tester", count: 1)])
+
+        let pids = await store.distinctValues(
+            for: .pid,
+            matching: MacFSWQueryParser.parse(""),
+            limit: 10
+        )
+        XCTAssertEqual(Set(pids.map(\.value)), ["42", "43"])
+    }
+
+    func testFieldCatalogCoversEveryQueryField() {
+        let coveredFields = MacFSWQueryFieldCatalog.descriptors.map(\.field)
+        XCTAssertEqual(Set(coveredFields), Set(MacFSWQueryField.allCases))
+        XCTAssertEqual(coveredFields.count, MacFSWQueryField.allCases.count)
+
+        var seenAliases: Set<String> = []
+        for descriptor in MacFSWQueryFieldCatalog.descriptors {
+            XCTAssertTrue(descriptor.aliases.contains(descriptor.canonicalKey), "canonical key \(descriptor.canonicalKey) must be an alias of \(descriptor.field)")
+            for alias in descriptor.aliases {
+                XCTAssertTrue(seenAliases.insert(alias).inserted, "alias \(alias) is claimed by more than one field")
+            }
+        }
+    }
+
+    func testFieldCatalogLookupMatchesLegacyAliases() {
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "op"), .eventType)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "eventtype"), .eventType)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "opclass"), .operationClass)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "path.target"), .targetPath)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "src"), .sourcePath)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "pname"), .processName)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "process.id"), .pid)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "process.executable"), .executable)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "process.signingid"), .signingID)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "process.teamid"), .teamID)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "platform.binary"), .platformBinary)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "user.id"), .uid)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "group.id"), .gid)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "uid/gid"), .uidGid)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "uuid"), .eventID)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "sequence"), .sequence)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "ts"), .timestamp)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "raw.type"), .rawType)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "rawversion"), .esVersion)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "flag"), .flags)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "metadata"), .parameters)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "writeevent"), .mutation)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "apple.controlled"), .appleControlled)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "audit.token"), .auditToken)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "codehash"), .cdhash)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "q"), .any)
+
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: "Event_Type"), .eventType)
+        XCTAssertEqual(MacFSWQueryFieldCatalog.field(forRawKey: " TEAM-ID "), .teamID)
+        XCTAssertNil(MacFSWQueryFieldCatalog.field(forRawKey: "bogus"))
+    }
+
+    func testCanonicalKeyResolvesToItsOwnField() {
+        for descriptor in MacFSWQueryFieldCatalog.descriptors {
+            XCTAssertEqual(
+                MacFSWQueryFieldCatalog.field(forRawKey: descriptor.canonicalKey),
+                descriptor.field,
+                "canonical key \(descriptor.canonicalKey) must resolve to \(descriptor.field)"
+            )
+            XCTAssertEqual(MacFSWQueryFieldCatalog.descriptor(for: descriptor.field), descriptor)
+        }
+    }
 }

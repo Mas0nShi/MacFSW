@@ -474,6 +474,32 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         }
     }
 
+    public func distinctValues(
+        for field: MacFSWQueryField,
+        matching query: MacFSWEventQuery,
+        limit: Int
+    ) async throws -> [MacFSWFacetValue] {
+        guard let column = MacFSWSQLQueryCompiler.facetColumn(for: field), limit > 0 else {
+            return []
+        }
+        let compiled = MacFSWSQLQueryCompiler.compile(query)
+        let arguments = MacFSWSQLQueryCompiler.arguments(compiled.arguments)
+        let sql = """
+        SELECT \(column) AS facetValue, COUNT(*) AS eventCount
+        FROM events
+        WHERE (\(compiled.whereSQL)) AND \(column) <> ''
+        GROUP BY facetValue
+        ORDER BY eventCount DESC, facetValue ASC
+        LIMIT \(limit)
+        """
+
+        return try await dbQueue.read { db in
+            try Row.fetchAll(db, sql: sql, arguments: arguments).map { row in
+                MacFSWFacetValue(value: row["facetValue"], count: row["eventCount"])
+            }
+        }
+    }
+
     public func visibleRowIndex(
         of id: UUID,
         matching query: MacFSWEventQuery,
