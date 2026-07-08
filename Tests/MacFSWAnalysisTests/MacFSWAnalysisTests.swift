@@ -20,6 +20,12 @@ final class MacFSWAnalysisTests: XCTestCase {
 
             XCTAssertEqual(urlRequest.url?.absoluteString, "https://api.example.test\(endpoint.rawValue)")
             XCTAssertEqual(urlRequest.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+            XCTAssertEqual(urlRequest.value(forHTTPHeaderField: "Accept"), "text/event-stream")
+            XCTAssertEqual(urlRequest.value(forHTTPHeaderField: "Cache-Control"), "no-cache")
+            XCTAssertEqual(
+                urlRequest.value(forHTTPHeaderField: "Accept-Encoding"), "identity",
+                "streaming requests must opt out of gzip so SSE frames aren't buffered per compression frame"
+            )
 
             let body = try XCTUnwrap(urlRequest.httpBody)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])

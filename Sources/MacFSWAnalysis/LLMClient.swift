@@ -193,8 +193,20 @@ public final class MacFSWLLMClient: @unchecked Sendable {
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = TimeInterval(settings.timeoutSeconds)
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue(settings.streamResponses ? "text/event-stream" : "application/json", forHTTPHeaderField: "Accept")
         urlRequest.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+        if settings.streamResponses {
+            urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            // Many gateways gzip SSE responses and only flush per compression
+            // frame — from the client's view the whole reply arrives in one
+            // burst at the end. `identity` tells the server not to compress;
+            // URLSession also stops adding its own Accept-Encoding once we
+            // set one explicitly, so nothing else gets negotiated back on.
+            urlRequest.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+            urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        } else {
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        }
         urlRequest.httpBody = try Self.requestBody(for: request)
         return urlRequest
     }
