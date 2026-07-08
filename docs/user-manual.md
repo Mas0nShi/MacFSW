@@ -510,9 +510,12 @@ Configure:
 - API Key
 - Model
 - Stream response
-- Max Events
-- Token Budget
+- Max Events (events fetched from the store)
+- Token Budget (upper bound for the model's output tokens)
 - Timeout
+- Output Language (report language; Follow System uses your macOS language)
+- Event Sample Budget (character budget for event samples in the prompt; a chars/4 token estimate is shown next to it)
+- Prompt templates: pick a built-in (Security Triage, Behavior Summary, File Access Audit, Timeline Reconstruction), Duplicate one to customize it, or Edit / Delete your own. Templates use `{{placeholders}}` — the editor lists them under Placeholder Reference and warns about unknown ones.
 
 Use Test Connection before running analysis.
 
@@ -520,15 +523,18 @@ Use Test Connection before running analysis.
 
 1. Switch to Analysis Beta.
 2. Select a process in the process sidebar.
-3. Click Run.
-4. Review the streaming Markdown report.
-5. Select completed reports from the report history.
+3. Pick a prompt template from the menu next to Run.
+4. Click Run.
+5. Review the streaming Markdown report.
+6. Select completed reports from the report history.
+
+The report header shows the sampled/total event count so you can see how much of the session the model actually saw. Raising the Event Sample Budget lets more events into the prompt (subject to the model's context window).
 
 ### 12.3 Limits and Privacy
 
 Analysis can send event summaries and path data to the configured provider. Review provider terms and local policy before sending private captures.
 
-Use lower Max Events and Token Budget settings when working with private or very large sessions.
+Use lower Max Events, Event Sample Budget, and Token Budget settings when working with private or very large sessions.
 
 ## 13. System Extension Settings
 
