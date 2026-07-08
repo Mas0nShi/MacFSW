@@ -273,13 +273,11 @@ public final class MacFSWLLMClient: @unchecked Sendable {
                     }
 
                     var parser = MacFSWSSEParser()
-                    for try await line in bytes.lines {
-                        try Task.checkCancellation()
-                        let events = parser.feed(line: line)
+
+                    func handle(_ events: [MacFSWSSEEvent]) throws -> Bool {
                         for event in events {
                             if event.data == "[DONE]" {
-                                continuation.finish()
-                                return
+                                return true
                             }
                             if event.event == "error" || !MacFSWLLMDeltaExtractor.errorMessages(from: event.data).isEmpty {
                                 throw MacFSWLLMClientError.streamError(body: event.data)
@@ -288,15 +286,37 @@ public final class MacFSWLLMClient: @unchecked Sendable {
                                 continuation.yield(MacFSWLLMDelta(text: text))
                             }
                         }
+                        return false
                     }
-                    for event in parser.finish() where event.data != "[DONE]" {
-                        if event.event == "error" || !MacFSWLLMDeltaExtractor.errorMessages(from: event.data).isEmpty {
-                            throw MacFSWLLMClientError.streamError(body: event.data)
+
+                    // Lines are split by hand: `bytes.lines` silently drops
+                    // empty lines, and empty lines are exactly what delimits
+                    // SSE events — with them gone the parser would buffer
+                    // every event until EOF and the "stream" would replay
+                    // after completion. Splitting on 0x0A is UTF-8 safe
+                    // (multi-byte sequences never contain it); the parser
+                    // already trims a trailing "\r".
+                    var lineData = Data()
+                    for try await byte in bytes {
+                        guard byte == UInt8(ascii: "\n") else {
+                            lineData.append(byte)
+                            continue
                         }
-                        for text in try MacFSWLLMDeltaExtractor.deltaTexts(from: event.data, endpoint: endpoint) where !text.isEmpty {
-                            continuation.yield(MacFSWLLMDelta(text: text))
+                        try Task.checkCancellation()
+                        let line = String(decoding: lineData, as: UTF8.self)
+                        lineData.removeAll(keepingCapacity: true)
+                        if try handle(parser.feed(line: line)) {
+                            continuation.finish()
+                            return
                         }
                     }
+                    if !lineData.isEmpty {
+                        if try handle(parser.feed(line: String(decoding: lineData, as: UTF8.self))) {
+                            continuation.finish()
+                            return
+                        }
+                    }
+                    _ = try handle(parser.finish().filter { $0.data != "[DONE]" })
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
