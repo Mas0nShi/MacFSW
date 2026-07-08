@@ -112,6 +112,51 @@ final class MacFSWAnalysisTests: XCTestCase {
         XCTAssertFalse(raw.contains("apiKey"))
     }
 
+    func testLLMSettingsDecodesLegacyBlobWithNewDefaults() throws {
+        let legacy = #"""
+        {"endpoint":"/v1/chat/completions","baseURL":"https://x","model":"gpt-4","maxEvents":500,"tokenBudget":8000,"timeoutSeconds":30,"streamResponses":true}
+        """#
+        let settings = try JSONDecoder().decode(MacFSWLLMSettings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(settings.outputLanguage, .english)
+        XCTAssertEqual(settings.promptEventCharacterBudget, 120_000)
+        XCTAssertEqual(settings.model, "gpt-4")
+    }
+
+    func testLLMSettingsPersistsOutputLanguageAndBudget() throws {
+        let settings = MacFSWLLMSettings(
+            outputLanguage: .simplifiedChinese,
+            promptEventCharacterBudget: 80_000
+        )
+        let encoded = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(MacFSWLLMSettings.self, from: encoded)
+        XCTAssertEqual(decoded.outputLanguage, .simplifiedChinese)
+        XCTAssertEqual(decoded.promptEventCharacterBudget, 80_000)
+    }
+
+    func testSettingsStorePromptTemplateStateRoundTrip() throws {
+        let suiteName = "MacFSWAnalysisTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let store = MacFSWSettingsStore(defaults: defaults)
+
+        XCTAssertEqual(store.loadPromptTemplateState(), MacFSWAnalysisPromptTemplateState())
+
+        let custom = MacFSWAnalysisPromptTemplate(
+            name: "Custom",
+            summary: "s",
+            systemPromptTemplate: "sys",
+            userPromptTemplate: "user"
+        )
+        let state = MacFSWAnalysisPromptTemplateState(
+            customTemplates: [custom],
+            selectedTemplateID: custom.id
+        )
+        try store.savePromptTemplateState(state)
+        XCTAssertEqual(store.loadPromptTemplateState(), state)
+    }
+
     func testHTTPErrorDetailsExtractProviderMessageWithoutLosingRawBody() {
         let body = #"{"error":{"type":"http_error","message":"当前用户、用户组无权限访问该模型","code":"forbidden"}}"#
         let details = MacFSWLLMHTTPErrorDetails(statusCode: 403, body: body)
