@@ -80,7 +80,8 @@ struct MonitorCommandBar: View {
                         model.queryHighlightRuns(for: text)
                     },
                     fillCommitSerial: model.queryFillCommitSerial,
-                    fillCommitBasis: model.queryFillCommitBasis
+                    fillCommitBasis: model.queryFillCommitBasis,
+                    previewBasis: model.querySuggestionPreviewBasis
                 )
 
                 if let warning = model.queryDiagnosticSummary {
@@ -95,9 +96,7 @@ struct MonitorCommandBar: View {
                         .controlSize(.small)
                 } else if !model.queryText.isEmpty {
                     Button {
-                        model.dismissQuerySuggestions()
-                        model.queryText = ""
-                        Task { await model.refreshFilteredEvents() }
+                        model.clearQuery()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)

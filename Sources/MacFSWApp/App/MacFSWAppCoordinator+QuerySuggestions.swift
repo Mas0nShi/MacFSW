@@ -208,13 +208,31 @@ extension MacFSWAppCoordinator {
         return true
     }
 
+    /// Single entry for programmatic query replacements that must be
+    /// undoable as one step: records the swap basis and bumps the commit
+    /// serial the field observes.
+    func setQueryTextRegisteringUndo(_ newText: String, undoingTo basisOverride: String? = nil) {
+        monitorStore.queryFillCommitBasis = basisOverride ?? queryText
+        monitorStore.queryFillCommitSerial += 1
+        monitorStore.querySuggestionPreviewBasis = nil
+        queryText = newText
+    }
+
+    func clearQuery() {
+        dismissQuerySuggestions()
+        setQueryTextRegisteringUndo("")
+        Task {
+            await refreshFilteredEvents()
+        }
+    }
+
     func acceptSuggestion(_ suggestion: QuerySuggestion) {
         // Undo restores what the user actually typed (the preview basis),
         // not the last previewed candidate.
-        monitorStore.queryFillCommitBasis = monitorStore.querySuggestionPreviewBasis ?? queryText
-        monitorStore.queryFillCommitSerial += 1
-        monitorStore.querySuggestionPreviewBasis = nil
-        queryText = suggestion.resultText
+        setQueryTextRegisteringUndo(
+            suggestion.resultText,
+            undoingTo: monitorStore.querySuggestionPreviewBasis
+        )
         scheduleQueryRefresh()
         switch suggestion.kind {
         case .field:
