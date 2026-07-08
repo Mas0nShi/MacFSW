@@ -164,18 +164,21 @@ final class AnalysisStore: ObservableObject {
                 let stream = try await client.streamAnalysis(request: request)
                 var buffer: [String] = []
                 var lastPublishedLength = 0
-                var lastPublishedAt = ContinuousClock.now
-                let publishInterval = Duration.milliseconds(33)
+                var lastPublishedAt = ContinuousClock.now - .seconds(1)
+                let coalesceWindow = Duration.milliseconds(16)
 
                 for try await delta in stream {
                     try Task.checkCancellation()
                     buffer.append(delta.text)
                     let now = ContinuousClock.now
-                    // Deltas arrive as fast as the network; MarkdownView re-parses
-                    // the entire buffer on every input change, so we coalesce
-                    // publications to ≈one per display frame. The final flush
-                    // after the loop guarantees the last tokens still land.
-                    if now - lastPublishedAt < publishInterval {
+                    // Publish the FIRST delta immediately so tokens appear as
+                    // soon as bytes land, then coalesce further deltas that
+                    // arrive within one display frame — MarkdownView reparses
+                    // the whole buffer on every input change, so back-to-back
+                    // updates within the same frame are pure waste. Slow
+                    // models still see each delta ship on arrival; fast
+                    // models get frame-rate batching for free.
+                    if now - lastPublishedAt < coalesceWindow {
                         continue
                     }
                     let joined = buffer.joined()
