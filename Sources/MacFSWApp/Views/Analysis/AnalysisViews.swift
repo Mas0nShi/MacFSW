@@ -287,22 +287,6 @@ struct AnalysisMarkdownReportView: View {
                         Text(isStreaming ? "Waiting for model output..." : "No markdown output.")
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
-                    } else if isStreaming {
-                        // While streaming, only COMPLETED blocks go through
-                        // MarkdownView (it re-parses and re-highlights its
-                        // whole input on every change); the growing tail
-                        // renders as plain text and upgrades once its block
-                        // completes.
-                        let parts = StreamingMarkdownSplitter.split(markdown)
-                        if !parts.stablePrefix.isEmpty {
-                            MarkdownView(parts.stablePrefix)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        if !parts.tail.isEmpty {
-                            Text(parts.tail)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
                     } else {
                         MarkdownView(markdown)
                             .textSelection(.enabled)
