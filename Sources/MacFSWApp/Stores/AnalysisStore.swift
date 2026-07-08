@@ -162,11 +162,37 @@ final class AnalysisStore: ObservableObject {
                     userPrompt: prepared.userPrompt
                 )
                 let stream = try await client.streamAnalysis(request: request)
-                var accumulated = ""
+                var buffer: [String] = []
+                var lastPublishedLength = 0
+                var lastPublishedAt = ContinuousClock.now
+                let publishInterval = Duration.milliseconds(33)
 
                 for try await delta in stream {
                     try Task.checkCancellation()
-                    accumulated += delta.text
+                    buffer.append(delta.text)
+                    let now = ContinuousClock.now
+                    // Deltas arrive as fast as the network; MarkdownView re-parses
+                    // the entire buffer on every input change, so we coalesce
+                    // publications to ≈one per display frame. The final flush
+                    // after the loop guarantees the last tokens still land.
+                    if now - lastPublishedAt < publishInterval {
+                        continue
+                    }
+                    let joined = buffer.joined()
+                    guard joined.count != lastPublishedLength else {
+                        continue
+                    }
+                    lastPublishedLength = joined.count
+                    lastPublishedAt = now
+                    await MainActor.run {
+                        guard let self, self.analysisGeneration == generation else {
+                            return
+                        }
+                        self.streamingMarkdown = joined
+                    }
+                }
+                let accumulated = buffer.joined()
+                if accumulated.count != lastPublishedLength {
                     await MainActor.run {
                         guard let self, self.analysisGeneration == generation else {
                             return
