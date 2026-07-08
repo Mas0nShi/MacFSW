@@ -52,6 +52,29 @@ struct AnalysisHeaderView: View {
                 .foregroundStyle(.secondary)
             }
 
+            Picker("Template", selection: Binding(
+                get: { model.selectedAnalysisTemplateID },
+                set: { model.selectedAnalysisTemplateID = $0 }
+            )) {
+                Section("Built-in") {
+                    ForEach(model.analysisTemplates.filter(\.isBuiltIn)) { template in
+                        Text(template.name).tag(template.id)
+                    }
+                }
+                let custom = model.analysisTemplates.filter { !$0.isBuiltIn }
+                if !custom.isEmpty {
+                    Section("Custom") {
+                        ForEach(custom) { template in
+                            Text(template.name).tag(template.id)
+                        }
+                    }
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: 200)
+            .disabled(model.isAnalysisRunning)
+
             if model.isAnalysisRunning {
                 Button {
                     model.cancelAnalysis()

@@ -19,6 +19,7 @@ final class MacFSWAppCoordinator: ObservableObject {
     let captureStore: CaptureStore
     let monitorStore: MonitorStore
     let queryHistoryStore: QueryHistoryStore
+    let analysisTemplateStore: AnalysisTemplateStore
     let logStore: AppLogStore
 
     let environment: MacFSWAppEnvironment
@@ -36,6 +37,7 @@ final class MacFSWAppCoordinator: ObservableObject {
         self.captureStore = CaptureStore(client: environment.captureClient)
         self.monitorStore = MonitorStore()
         self.queryHistoryStore = QueryHistoryStore()
+        self.analysisTemplateStore = AnalysisTemplateStore(settingsStore: environment.settingsStore)
         self.logStore = AppLogStore()
         let initialSession = MacFSWResearchSession(
             name: "Untitled Research Session",

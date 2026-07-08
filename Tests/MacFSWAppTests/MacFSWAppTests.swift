@@ -162,6 +162,57 @@ final class MacFSWAppTests: XCTestCase {
     }
 
     @MainActor
+    func testAnalysisTemplateStorePersistsAndReloads() throws {
+        let suiteName = "MacFSWAppTests.Templates.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let settings = MacFSWSettingsStore(defaults: defaults)
+
+        let first = AnalysisTemplateStore(settingsStore: settings)
+        XCTAssertEqual(first.selectedTemplateID, MacFSWAnalysisPromptTemplateCatalog.defaultTemplate.id)
+        let custom = first.duplicate(MacFSWAnalysisPromptTemplateCatalog.securityTriage)
+        first.selectedTemplateID = custom.id
+
+        let reloaded = AnalysisTemplateStore(settingsStore: settings)
+        XCTAssertEqual(reloaded.customTemplates.map(\.id), [custom.id])
+        XCTAssertEqual(reloaded.selectedTemplateID, custom.id)
+        XCTAssertEqual(reloaded.selectedTemplate.id, custom.id)
+    }
+
+    @MainActor
+    func testAnalysisTemplateStoreFallsBackWhenSelectedTemplateDeleted() {
+        let suiteName = "MacFSWAppTests.Templates.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let store = AnalysisTemplateStore(settingsStore: MacFSWSettingsStore(defaults: defaults))
+        let custom = store.duplicate(MacFSWAnalysisPromptTemplateCatalog.behaviorSummary)
+        store.selectedTemplateID = custom.id
+
+        store.delete(id: custom.id)
+        XCTAssertEqual(store.selectedTemplateID, MacFSWAnalysisPromptTemplateCatalog.defaultTemplate.id)
+        XCTAssertTrue(store.customTemplates.isEmpty)
+    }
+
+    @MainActor
+    func testAnalysisTemplateStoreRefusesBuiltInMutation() {
+        let store = AnalysisTemplateStore(
+            settingsStore: MacFSWSettingsStore(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        )
+        var builtIn = MacFSWAnalysisPromptTemplateCatalog.securityTriage
+        builtIn.name = "Hijacked"
+        store.update(builtIn)
+        store.delete(id: builtIn.id)
+        XCTAssertEqual(
+            store.builtInTemplates.first { $0.id == builtIn.id }?.name,
+            MacFSWAnalysisPromptTemplateCatalog.securityTriage.name
+        )
+    }
+
+    @MainActor
     func testAnalysisStoreResetForNewSessionClearsTransientAndHistoryState() {
         let store = AnalysisStore(llmClient: MacFSWLLMClient())
         store.results = [

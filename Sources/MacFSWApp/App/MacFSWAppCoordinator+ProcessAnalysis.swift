@@ -147,6 +147,7 @@ extension MacFSWAppCoordinator {
             target: selectedAnalysisProcess,
             eventStore: eventStore,
             settings: llmSettings,
+            template: selectedAnalysisTemplate,
             reportError: { [weak self] error in
                 self?.reportError(error)
             }

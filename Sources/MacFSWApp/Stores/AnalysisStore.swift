@@ -99,6 +99,7 @@ final class AnalysisStore: ObservableObject {
         target: MacFSWProcessSummary?,
         eventStore: MacFSWSQLiteEventStore,
         settings: MacFSWLLMSettings,
+        template: MacFSWAnalysisPromptTemplate,
         reportError: @MainActor @escaping (Error) -> Void
     ) {
         guard let target else {
@@ -143,7 +144,10 @@ final class AnalysisStore: ObservableObject {
                 let prepared = MacFSWAnalysisPayloadBuilder.build(
                     process: context,
                     events: events,
-                    totalEventCount: total
+                    totalEventCount: total,
+                    template: template,
+                    outputLanguageName: settings.outputLanguage.promptName(resolvingSystemWith: .current),
+                    eventSampleCharacterBudget: settings.promptEventCharacterBudget
                 )
                 await MainActor.run {
                     guard let self, self.analysisGeneration == generation else {
@@ -186,7 +190,7 @@ final class AnalysisStore: ObservableObject {
                     sampledEventCount: prepared.sampledEventCount,
                     pathCount: prepared.pathCount,
                     operationCount: prepared.operationCount,
-                    templateName: MacFSWAnalysisPromptTemplateCatalog.defaultTemplate.name,
+                    templateName: template.name,
                     markdown: finalMarkdown
                 )
                 await MainActor.run {

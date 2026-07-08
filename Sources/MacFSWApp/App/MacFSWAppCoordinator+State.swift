@@ -360,6 +360,19 @@ extension MacFSWAppCoordinator {
         set { analysisStore.selectedResultID = newValue }
     }
 
+    var analysisTemplates: [MacFSWAnalysisPromptTemplate] {
+        analysisTemplateStore.allTemplates
+    }
+
+    var selectedAnalysisTemplateID: UUID {
+        get { analysisTemplateStore.selectedTemplateID }
+        set { analysisTemplateStore.selectedTemplateID = newValue }
+    }
+
+    var selectedAnalysisTemplate: MacFSWAnalysisPromptTemplate {
+        analysisTemplateStore.selectedTemplate
+    }
+
     var llmConnectionTestState: MacFSWConnectionTestState {
         get { analysisStore.connectionTestState }
         set { analysisStore.connectionTestState = newValue }

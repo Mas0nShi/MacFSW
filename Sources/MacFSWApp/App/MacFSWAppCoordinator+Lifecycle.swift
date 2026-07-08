@@ -56,6 +56,14 @@ extension MacFSWAppCoordinator {
                 self?.objectWillChange.send()
             }
             .store(in: &storeCancellables)
+        analysisTemplateStore.onError = { [weak self] error in
+            self?.reportError(error)
+        }
+        analysisTemplateStore.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &storeCancellables)
         logStore.objectWillChange
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
