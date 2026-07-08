@@ -172,10 +172,12 @@ final class MacFSWAppTests: XCTestCase {
                 durationSeconds: 1,
                 scope: "scope",
                 providerSummary: "provider",
-                eventCount: 10,
-                payloadEventCount: 5,
+                totalEventCount: 10,
+                fetchedEventCount: 5,
+                sampledEventCount: 5,
                 pathCount: 2,
                 operationCount: 3,
+                templateName: "Security Triage",
                 markdown: "# Report"
             )
         ]

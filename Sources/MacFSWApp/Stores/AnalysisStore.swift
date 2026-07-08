@@ -181,10 +181,12 @@ final class AnalysisStore: ObservableObject {
                     durationSeconds: Date().timeIntervalSince(startedAt),
                     scope: "Selected process, current session",
                     providerSummary: "\(settings.endpoint.rawValue) · \(settings.model)",
-                    eventCount: prepared.eventCount,
-                    payloadEventCount: prepared.payloadEventCount,
+                    totalEventCount: prepared.totalEventCount,
+                    fetchedEventCount: prepared.fetchedEventCount,
+                    sampledEventCount: prepared.sampledEventCount,
                     pathCount: prepared.pathCount,
                     operationCount: prepared.operationCount,
+                    templateName: MacFSWAnalysisPromptTemplateCatalog.defaultTemplate.name,
                     markdown: finalMarkdown
                 )
                 await MainActor.run {

@@ -8,9 +8,11 @@ struct MacFSWAnalysisResult: Identifiable, Equatable, Sendable {
     var durationSeconds: Double
     var scope: String
     var providerSummary: String
-    var eventCount: Int
-    var payloadEventCount: Int
+    var totalEventCount: Int
+    var fetchedEventCount: Int
+    var sampledEventCount: Int
     var pathCount: Int
     var operationCount: Int
+    var templateName: String
     var markdown: String
 }

@@ -152,7 +152,7 @@ struct AnalysisHistoryRow: View {
             Text(result.createdAt.formatted(date: .omitted, time: .standard))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-            Text("\(result.payloadEventCount)/\(result.eventCount) events · \(result.operationCount) ops")
+            Text("\(result.sampledEventCount)/\(result.totalEventCount) events · \(result.operationCount) ops")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -175,7 +175,7 @@ struct AnalysisReportPane: View {
                 AnalysisMarkdownReportView(
                     title: model.selectedAnalysisProcess?.displayName ?? "Running Analysis",
                     subtitle: "Streaming response",
-                    eventCount: nil,
+                    eventsLabel: nil,
                     pathCount: nil,
                     operationCount: nil,
                     markdown: model.streamingAnalysisMarkdown,
@@ -187,8 +187,8 @@ struct AnalysisReportPane: View {
             } else if let result = model.selectedAnalysis {
                 AnalysisMarkdownReportView(
                     title: result.processDisplayName,
-                    subtitle: "\(result.scope) · \(result.providerSummary) · \(String(format: "%.1fs", result.durationSeconds))",
-                    eventCount: result.eventCount,
+                    subtitle: "\(result.scope) · \(result.providerSummary) · \(result.templateName) · \(String(format: "%.1fs", result.durationSeconds))",
+                    eventsLabel: "\(result.sampledEventCount)/\(result.totalEventCount)",
                     pathCount: result.pathCount,
                     operationCount: result.operationCount,
                     markdown: result.markdown,
@@ -219,7 +219,9 @@ struct AnalysisReportPane: View {
 struct AnalysisMarkdownReportView: View {
     let title: String
     let subtitle: String
-    let eventCount: Int?
+    /// Rendered as "sampled/total" so the card is honest about how much of
+    /// the session the model actually saw.
+    let eventsLabel: String?
     let pathCount: Int?
     let operationCount: Int?
     let markdown: String
@@ -246,9 +248,9 @@ struct AnalysisMarkdownReportView: View {
                             .lineLimit(1)
                     }
 
-                    if let eventCount, let pathCount, let operationCount {
+                    if let eventsLabel, let pathCount, let operationCount {
                         HStack(spacing: 10) {
-                            AnalysisStat(title: "Events", value: "\(eventCount)")
+                            AnalysisStat(title: "Events", value: eventsLabel)
                             AnalysisStat(title: "Paths", value: "\(pathCount)")
                             AnalysisStat(title: "Operations", value: "\(operationCount)")
                         }

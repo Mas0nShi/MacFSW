@@ -181,12 +181,12 @@ final class MacFSWAnalysisTests: XCTestCase {
         let prepared = MacFSWAnalysisPayloadBuilder.build(
             process: context,
             events: events,
-            totalEventCount: 10,
-            maxEventSamples: 3
+            totalEventCount: 10
         )
 
-        XCTAssertEqual(prepared.eventCount, 10)
-        XCTAssertEqual(prepared.payloadEventCount, 3)
+        XCTAssertEqual(prepared.totalEventCount, 10)
+        XCTAssertEqual(prepared.fetchedEventCount, 3)
+        XCTAssertEqual(prepared.sampledEventCount, 3)
         XCTAssertTrue(prepared.userPrompt.contains("mode 0644"))
         XCTAssertTrue(prepared.userPrompt.contains("source=/tmp/src"))
         XCTAssertLessThan(
