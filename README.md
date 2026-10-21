@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://swift.org"><img alt="Swift 6.0" src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white"></a>
+  <a href="https://swift.org"><img alt="Swift 6.1" src="https://img.shields.io/badge/Swift-6.1-F05138?logo=swift&logoColor=white"></a>
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-111827?logo=apple&logoColor=white">
   <a href="LICENSE"><img alt="License Apache 2.0" src="https://img.shields.io/badge/License-Apache--2.0-2563eb"></a>
 </p>
@@ -113,7 +113,7 @@ Runtime:
 
 Development:
 
-- Swift 6 toolchain.
+- Swift 6.1 toolchain (Xcode 16.3 or later); the MCP SDK requires it.
 - Xcode command line tools.
 - Apple Development signing identity for local System Extension testing.
 - Apple-approved `com.apple.developer.endpoint-security.client` entitlement for real Endpoint Security capture.
