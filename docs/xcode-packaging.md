@@ -125,7 +125,11 @@ The host app needs:
 
 ```text
 com.apple.developer.system-extension.install
+com.apple.application-identifier = UYF535Y9QZ.com.mas0n.MacFSW
+keychain-access-groups           = [UYF535Y9QZ.com.mas0n.MacFSW]
 ```
+
+The last two let the app keep the LLM API key in the data-protection keychain, which authorizes by team and bundle ID instead of one exact code signature, so rebuilt or re-signed apps read it without a password prompt. Team provisioning profiles allow `keychain-access-groups = UYF535Y9QZ.*` by default; the `macfsw` CLI never touches the keychain.
 
 The System Extension needs Apple approval for:
 

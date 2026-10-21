@@ -383,6 +383,7 @@ EOF
   }
 
   verify_entitlement "$APP_BUNDLE" "com.apple.developer.system-extension.install"
+  verify_entitlement "$APP_BUNDLE" "keychain-access-groups"
   verify_entitlement "$EXT_BUNDLE" "com.apple.developer.endpoint-security.client"
 
   # The same requirement XPCClientPolicy has the extension enforce.

@@ -44,7 +44,7 @@ extension MacFSWAppCoordinator {
         analysis.runAnalysis(
             target: selectedAnalysisProcess,
             eventStore: session.eventStore,
-            settings: preferences.llmSettings,
+            settings: preferences.resolvedLLMSettings,
             template: analysisTemplates.selectedTemplate,
             reportError: { [weak self] error in
                 self?.reportError(error)
@@ -58,6 +58,6 @@ extension MacFSWAppCoordinator {
     }
 
     func testLLMConnection() {
-        analysis.testConnection(settings: preferences.llmSettings)
+        analysis.testConnection(settings: preferences.resolvedLLMSettings)
     }
 }

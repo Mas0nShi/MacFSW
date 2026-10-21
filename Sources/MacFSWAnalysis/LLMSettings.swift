@@ -139,24 +139,45 @@ public final class MacFSWSettingsStore: @unchecked Sendable {
         self.keychainAccount = keychainAccount
     }
 
+    /// Settings without the API key, which lives in the keychain and is
+    /// read only when needed (see `loadAPIKey()`).
     public func loadLLMSettings() -> MacFSWLLMSettings {
-        let decoded: MacFSWLLMSettings
-        if let data = defaults.data(forKey: settingsKey),
-           let settings = try? JSONDecoder().decode(MacFSWLLMSettings.self, from: data) {
-            decoded = settings
-        } else {
-            decoded = MacFSWLLMSettings()
+        guard let data = defaults.data(forKey: settingsKey),
+              let settings = try? JSONDecoder().decode(MacFSWLLMSettings.self, from: data) else {
+            return MacFSWLLMSettings()
         }
-
-        var settings = decoded
-        settings.apiKey = (try? MacFSWKeychain.read(service: keychainService, account: keychainAccount)) ?? ""
         return settings
     }
 
     public func saveLLMSettings(_ settings: MacFSWLLMSettings) throws {
         let data = try JSONEncoder().encode(settings)
         defaults.set(data, forKey: settingsKey)
-        try MacFSWKeychain.save(settings.apiKey, service: keychainService, account: keychainAccount)
+    }
+
+    /// Reads the API key from the data-protection keychain, moving a key
+    /// left in the legacy keychain by older builds on first use (that one
+    /// read may still prompt). Builds without the keychain entitlement —
+    /// unsigned development runs — get no key rather than a prompt.
+    public func loadAPIKey() -> String {
+        do {
+            if let key = try MacFSWKeychain.read(service: keychainService, account: keychainAccount) {
+                return key
+            }
+        } catch {
+            return ""
+        }
+        guard let legacy = try? MacFSWKeychain.read(service: keychainService, account: keychainAccount, in: .legacyFile),
+              !legacy.isEmpty else {
+            return ""
+        }
+        if (try? MacFSWKeychain.save(legacy, service: keychainService, account: keychainAccount)) != nil {
+            try? MacFSWKeychain.delete(service: keychainService, account: keychainAccount, in: .legacyFile)
+        }
+        return legacy
+    }
+
+    public func saveAPIKey(_ key: String) throws {
+        try MacFSWKeychain.save(key, service: keychainService, account: keychainAccount)
     }
 
     public func loadPromptTemplateState() -> MacFSWAnalysisPromptTemplateState {

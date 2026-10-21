@@ -195,7 +195,7 @@ struct AnalysisSettingsPane: View {
 
                 TextField("Base URL", text: $preferences.llmSettings.baseURL)
 
-                SecureField("API Key", text: $preferences.llmSettings.apiKey)
+                SecureField("API Key", text: $preferences.apiKey)
 
                 TextField("Model", text: $preferences.llmSettings.model)
 
@@ -268,6 +268,9 @@ struct AnalysisSettingsPane: View {
         .padding(18)
         .onChange(of: model.preferences.llmSettings) {
             // A finished connection test no longer describes edited settings.
+            model.analysis.resetConnectionStateIfIdle()
+        }
+        .onChange(of: model.preferences.apiKey) {
             model.analysis.resetConnectionStateIfIdle()
         }
     }

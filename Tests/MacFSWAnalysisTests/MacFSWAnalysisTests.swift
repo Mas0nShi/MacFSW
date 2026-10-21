@@ -174,24 +174,26 @@ final class MacFSWAnalysisTests: XCTestCase {
         XCTAssertTrue(details.diagnosticText.contains(body))
     }
 
+    // Uses the legacy store: unsigned test runners lack the entitlement the
+    // data-protection keychain requires, and the wrapper logic is shared.
     func testKeychainWrapperReadsWritesAndDeletesAPIKey() throws {
         let service = "com.macfsw.tests.llm.\(UUID().uuidString)"
         let account = "default"
-        try? MacFSWKeychain.delete(service: service, account: account)
+        try? MacFSWKeychain.delete(service: service, account: account, in: .legacyFile)
         addTeardownBlock {
-            try? MacFSWKeychain.delete(service: service, account: account)
+            try? MacFSWKeychain.delete(service: service, account: account, in: .legacyFile)
         }
 
-        XCTAssertNil(try MacFSWKeychain.read(service: service, account: account))
+        XCTAssertNil(try MacFSWKeychain.read(service: service, account: account, in: .legacyFile))
 
-        try MacFSWKeychain.save("first-key", service: service, account: account)
-        XCTAssertEqual(try MacFSWKeychain.read(service: service, account: account), "first-key")
+        try MacFSWKeychain.save("first-key", service: service, account: account, in: .legacyFile)
+        XCTAssertEqual(try MacFSWKeychain.read(service: service, account: account, in: .legacyFile), "first-key")
 
-        try MacFSWKeychain.save("second-key", service: service, account: account)
-        XCTAssertEqual(try MacFSWKeychain.read(service: service, account: account), "second-key")
+        try MacFSWKeychain.save("second-key", service: service, account: account, in: .legacyFile)
+        XCTAssertEqual(try MacFSWKeychain.read(service: service, account: account, in: .legacyFile), "second-key")
 
-        try MacFSWKeychain.delete(service: service, account: account)
-        XCTAssertNil(try MacFSWKeychain.read(service: service, account: account))
+        try MacFSWKeychain.delete(service: service, account: account, in: .legacyFile)
+        XCTAssertNil(try MacFSWKeychain.read(service: service, account: account, in: .legacyFile))
     }
 
     func testPayloadBuilderOrdersRecentEventsAndIncludesOperationParameters() {
