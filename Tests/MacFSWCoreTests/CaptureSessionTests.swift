@@ -40,6 +40,20 @@ final class CaptureSessionTests: XCTestCase {
         try await session.close()
     }
 
+    func testStopReturnsOnlyAfterBufferedBatchesAreStored() async throws {
+        let client = FakeCaptureClient()
+        let session = try MacFSWCaptureSession.temporary(for: MacFSWResearchSession(), client: client)
+        try await session.start(config: MacFSWCaptureConfig())
+        for batch in 0..<200 {
+            client.deliver(Self.events(batch: batch, count: 50))
+        }
+        await session.stop()
+
+        let stored = try await session.store.count(matching: MacFSWEventQuery())
+        XCTAssertEqual(stored, 10_000)
+        try await session.close()
+    }
+
     func testStopWhileConnectingClosesTheStreamOnceItOpens() async throws {
         let client = FakeCaptureClient(opensImmediately: false)
         let session = try MacFSWCaptureSession.temporary(for: MacFSWResearchSession(), client: client)

@@ -124,11 +124,13 @@ public actor MacFSWCaptureSession {
             guard !Task.isCancelled else {
                 return
             }
-            self.stop()
+            await self.stop()
         }
     }
 
-    public func stop() {
+    /// Stops recording and returns once every batch already received is in
+    /// the store, so a save right after stopping keeps the whole capture.
+    public func stop() async {
         switch state {
         case .connecting:
             setState(.stopped)
@@ -138,8 +140,23 @@ public actor MacFSWCaptureSession {
             handle?.stop()
             handle = nil
             setState(.stopped)
+            await drainIngest()
         default:
             break
+        }
+    }
+
+    /// Ingest ends at the stream's finish signal, which follows the last
+    /// batch. Bounded in case a client never signals the finish.
+    private func drainIngest() async {
+        guard let ingest = ingestTask else {
+            return
+        }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await ingest.value }
+            group.addTask { try? await Task.sleep(for: .seconds(2)) }
+            await group.next()
+            group.cancelAll()
         }
     }
 
@@ -150,7 +167,7 @@ public actor MacFSWCaptureSession {
     /// Stops capture, ends all observer streams, and deletes the backing
     /// store if it is temporary. The session is unusable afterwards.
     public func close() async throws {
-        stop()
+        await stop()
         ingestTask?.cancel()
         for continuation in observers.values {
             continuation.finish()
