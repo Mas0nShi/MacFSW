@@ -116,7 +116,6 @@ public enum MacFSWLLMClientError: Error, LocalizedError, Equatable, Sendable {
     case missingAPIKey
     case missingModel
     case invalidBaseURL(String)
-    case invalidRequestBody
     case httpError(statusCode: Int, body: String)
     case streamError(body: String)
     case noTextInResponse
@@ -129,8 +128,6 @@ public enum MacFSWLLMClientError: Error, LocalizedError, Equatable, Sendable {
             return "Configure an LLM model in Settings before running analysis."
         case .invalidBaseURL(let url):
             return "Invalid LLM base URL: \(url)"
-        case .invalidRequestBody:
-            return "Failed to build the LLM request body."
         case .httpError(let statusCode, let body):
             let details = MacFSWLLMHTTPErrorDetails(statusCode: statusCode, body: body)
             return "LLM request failed with \(details.title): \(details.message)"
@@ -207,7 +204,11 @@ public final class MacFSWLLMClient: @unchecked Sendable {
         } else {
             urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
         }
-        urlRequest.httpBody = try Self.requestBody(for: request)
+        urlRequest.httpBody = try Self.requestBody(
+            settings: settings,
+            systemPrompt: request.systemPrompt,
+            userPrompt: request.userPrompt
+        )
         return urlRequest
     }
 
@@ -229,43 +230,42 @@ public final class MacFSWLLMClient: @unchecked Sendable {
         return components.url
     }
 
-    public static func requestBody(for request: MacFSWLLMRequest) throws -> Data {
-        var settings = request.settings
-        settings.model = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        let body: [String: Any]
+    private static func requestBody(
+        settings: MacFSWLLMSettings,
+        systemPrompt: String,
+        userPrompt: String
+    ) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
         switch settings.endpoint {
         case .responses:
-            body = [
-                "model": settings.model,
-                "input": [
-                    ["role": "developer", "content": request.systemPrompt],
-                    ["role": "user", "content": request.userPrompt],
+            return try encoder.encode(ResponsesBody(
+                model: settings.model,
+                input: [
+                    ChatMessage(role: "developer", content: systemPrompt),
+                    ChatMessage(role: "user", content: userPrompt),
                 ],
-                "max_output_tokens": settings.tokenBudget,
-                "stream": settings.streamResponses,
-            ]
+                maxOutputTokens: settings.tokenBudget,
+                stream: settings.streamResponses
+            ))
         case .chatCompletions:
-            body = [
-                "model": settings.model,
-                "messages": [
-                    ["role": "system", "content": request.systemPrompt],
-                    ["role": "user", "content": request.userPrompt],
+            return try encoder.encode(ChatCompletionsBody(
+                model: settings.model,
+                messages: [
+                    ChatMessage(role: "system", content: systemPrompt),
+                    ChatMessage(role: "user", content: userPrompt),
                 ],
-                "max_tokens": settings.tokenBudget,
-                "stream": settings.streamResponses,
-            ]
+                maxTokens: settings.tokenBudget,
+                stream: settings.streamResponses
+            ))
         case .completions:
-            body = [
-                "model": settings.model,
-                "prompt": "\(request.systemPrompt)\n\n\(request.userPrompt)",
-                "max_tokens": settings.tokenBudget,
-                "stream": settings.streamResponses,
-            ]
+            return try encoder.encode(CompletionsBody(
+                model: settings.model,
+                prompt: "\(systemPrompt)\n\n\(userPrompt)",
+                maxTokens: settings.tokenBudget,
+                stream: settings.streamResponses
+            ))
         }
-        guard JSONSerialization.isValidJSONObject(body) else {
-            throw MacFSWLLMClientError.invalidRequestBody
-        }
-        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
     }
 
     private func stream(
@@ -649,5 +649,46 @@ public enum MacFSWLLMDeltaExtractor {
             }
         }
         return nil
+    }
+}
+
+private struct ChatMessage: Encodable {
+    var role: String
+    var content: String
+}
+
+private struct ResponsesBody: Encodable {
+    var model: String
+    var input: [ChatMessage]
+    var maxOutputTokens: Int
+    var stream: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case model, input, stream
+        case maxOutputTokens = "max_output_tokens"
+    }
+}
+
+private struct ChatCompletionsBody: Encodable {
+    var model: String
+    var messages: [ChatMessage]
+    var maxTokens: Int
+    var stream: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case model, messages, stream
+        case maxTokens = "max_tokens"
+    }
+}
+
+private struct CompletionsBody: Encodable {
+    var model: String
+    var prompt: String
+    var maxTokens: Int
+    var stream: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case model, prompt, stream
+        case maxTokens = "max_tokens"
     }
 }
