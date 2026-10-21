@@ -37,7 +37,7 @@ struct SidebarNavigationRow: View {
 }
 
 struct CaptureSidebarStatusView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -63,7 +63,7 @@ struct CaptureSidebarStatusView: View {
 }
 
 struct OperationStatsPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     private let buckets: [MacFSWOperationBucket] = [
         .read,

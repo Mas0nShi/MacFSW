@@ -4,12 +4,12 @@ import SwiftUI
 @main
 struct MacFSWApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var coordinator = MacFSWAppCoordinator()
+    @State private var coordinator = MacFSWAppCoordinator()
 
     var body: some Scene {
         WindowGroup {
             DashboardView()
-                .environmentObject(coordinator)
+                .environment(coordinator)
                 .frame(minWidth: 1180, minHeight: 720)
                 .onAppear {
                     appDelegate.coordinator = coordinator
@@ -50,7 +50,7 @@ struct MacFSWApp: App {
 
         Settings {
             SettingsView()
-                .environmentObject(coordinator)
+                .environment(coordinator)
                 .frame(width: 760, height: 540)
         }
     }

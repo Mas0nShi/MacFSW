@@ -1,13 +1,16 @@
 import Foundation
+import Observation
 import MacFSWCore
 
 @MainActor
-final class CaptureStore: ObservableObject {
-    @Published var state: MacFSWCaptureState = .idle
-    @Published var health = MacFSWCaptureHealth()
-    @Published var stats = MacFSWCaptureStats()
+@Observable
+final class CaptureStore {
+    var state: MacFSWCaptureState = .idle
+    var health = MacFSWCaptureHealth()
+    var stats = MacFSWCaptureStats()
 
     private let client: any MacFSWCaptureClient
+    @ObservationIgnored
     private var handle: MacFSWCaptureHandle?
 
     init(client: any MacFSWCaptureClient) {

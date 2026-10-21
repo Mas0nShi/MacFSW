@@ -2,7 +2,7 @@ import MacFSWCore
 import SwiftUI
 
 struct SystemExtensionSettingsPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         Form {
@@ -59,7 +59,7 @@ extension MacFSWCaptureProfile {
 }
 
 struct SystemExtensionStatusView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

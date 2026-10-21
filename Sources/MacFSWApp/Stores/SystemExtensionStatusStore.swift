@@ -1,12 +1,16 @@
 import Foundation
+import Observation
 import MacFSWCore
 
 @MainActor
-final class SystemExtensionStatusStore: ObservableObject {
-    @Published var installState: MacFSWSystemExtensionInstallState = .unknown
-    @Published var installMessage = "Checking System Extension readiness."
+@Observable
+final class SystemExtensionStatusStore {
+    var installState: MacFSWSystemExtensionInstallState = .unknown
+    var installMessage = "Checking System Extension readiness."
 
+    @ObservationIgnored
     var onErrorMessage: ((String) -> Void)?
+    @ObservationIgnored
     var onReady: (() -> Void)?
 
     private let installer: any SystemExtensionInstalling

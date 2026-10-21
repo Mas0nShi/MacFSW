@@ -1,20 +1,24 @@
 import Foundation
+import Observation
 import MacFSWAnalysis
 import MacFSWCore
 
 @MainActor
-final class AnalysisStore: ObservableObject {
-    @Published var selectedProcessID: MacFSWProcessSummary.ID?
-    @Published var isRunning = false
-    @Published var streamingMarkdown = ""
-    @Published var statusText = "Select a process to analyze."
-    @Published var runError: MacFSWConnectionTestError?
-    @Published var results: [MacFSWAnalysisResult] = []
-    @Published var selectedResultID: MacFSWAnalysisResult.ID?
-    @Published var connectionTestState: MacFSWConnectionTestState = .idle
+@Observable
+final class AnalysisStore {
+    var selectedProcessID: MacFSWProcessSummary.ID?
+    var isRunning = false
+    var streamingMarkdown = ""
+    var statusText = "Select a process to analyze."
+    var runError: MacFSWConnectionTestError?
+    var results: [MacFSWAnalysisResult] = []
+    var selectedResultID: MacFSWAnalysisResult.ID?
+    var connectionTestState: MacFSWConnectionTestState = .idle
 
     private let llmClient: MacFSWLLMClient
+    @ObservationIgnored
     private var analysisTask: Task<Void, Never>?
+    @ObservationIgnored
     private var analysisGeneration = 0
 
     init(llmClient: MacFSWLLMClient) {

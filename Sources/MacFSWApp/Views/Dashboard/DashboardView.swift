@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct DashboardView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
     @AppStorage("MacFSW.InspectorWidth") private var inspectorWidth = Self.defaultInspectorWidth
 
     private static let defaultInspectorWidth: Double = 380
@@ -89,7 +89,7 @@ private struct InspectorResizeHandle: View {
 }
 
 struct StatusBar: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         HStack(spacing: 14) {

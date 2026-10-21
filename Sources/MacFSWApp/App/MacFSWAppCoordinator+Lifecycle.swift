@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import Darwin
 import MacFSWAnalysis
 import MacFSWCore
@@ -8,20 +7,13 @@ import UniformTypeIdentifiers
 
 extension MacFSWAppCoordinator {
 
-    func observeStores() {
+    func wireStoreCallbacks() {
         preferencesStore.onError = { [weak self] error in
             self?.reportError(error)
         }
-        preferencesStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
-        processSidebarStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
+        analysisTemplateStore.onError = { [weak self] error in
+            self?.reportError(error)
+        }
         systemExtensionStatusStore.onErrorMessage = { [weak self] message in
             self?.errorMessage = message
             self?.logStore.record(.error, message, category: "SystemExtension")
@@ -31,44 +23,6 @@ extension MacFSWAppCoordinator {
                 await self?.refreshHealth()
             }
         }
-        systemExtensionStatusStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
-        analysisStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
-        sessionStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
-        captureStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
-        monitorStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
-        analysisTemplateStore.onError = { [weak self] error in
-            self?.reportError(error)
-        }
-        analysisTemplateStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
-        logStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &storeCancellables)
     }
 
     func cleanupStoreIfOwned(_ store: MacFSWSQLiteEventStore) async {

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Observation
 
 enum MacFSWAppLogLevel: String, CaseIterable, Identifiable {
     case error
@@ -58,20 +59,21 @@ actor MacFSWLogWriter {
 }
 
 @MainActor
-final class AppLogStore: ObservableObject {
-    @Published var isEnabled: Bool {
+@Observable
+final class AppLogStore {
+    var isEnabled: Bool {
         didSet {
             defaults.set(isEnabled, forKey: Self.isEnabledKey)
         }
     }
 
-    @Published var minimumLevel: MacFSWAppLogLevel {
+    var minimumLevel: MacFSWAppLogLevel {
         didSet {
             defaults.set(minimumLevel.rawValue, forKey: Self.minimumLevelKey)
         }
     }
 
-    @Published private(set) var lastWriteError: String?
+    private(set) var lastWriteError: String?
 
     let logDirectoryURL: URL
     let logFileURL: URL

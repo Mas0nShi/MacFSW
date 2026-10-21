@@ -1,25 +1,29 @@
 import Foundation
+import Observation
 import MacFSWCore
 
 @MainActor
-final class ProcessSidebarStore: ObservableObject {
-    @Published var processSearchText = "" {
+@Observable
+final class ProcessSidebarStore {
+    var processSearchText = "" {
         didSet {
             schedulePublish()
         }
     }
 
-    @Published private(set) var processSummaries: [MacFSWProcessSummary] = []
-    @Published private(set) var filteredProcessSummaries: [MacFSWProcessSummary] = []
-    @Published private(set) var filteredProcessGroups: [MacFSWProcessGroupSummary] = []
-    @Published var expandedProcessGroupIDs: Set<String> = []
-    @Published var includeExitedProcesses: Bool {
+    private(set) var processSummaries: [MacFSWProcessSummary] = []
+    private(set) var filteredProcessSummaries: [MacFSWProcessSummary] = []
+    private(set) var filteredProcessGroups: [MacFSWProcessGroupSummary] = []
+    var expandedProcessGroupIDs: Set<String> = []
+    var includeExitedProcesses: Bool {
         didSet {
             publish()
         }
     }
 
+    @ObservationIgnored
     private var processSummaryIndex: [MacFSWProcessSummary.ID: MacFSWProcessSummary] = [:]
+    @ObservationIgnored
     private var publishTask: Task<Void, Never>?
 
     init(includeExitedProcesses: Bool = true) {

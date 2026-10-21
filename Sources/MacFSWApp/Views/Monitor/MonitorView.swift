@@ -1,9 +1,10 @@
 import SwiftUI
 
 struct MonitorView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
+        @Bindable var model = model
         VStack(spacing: 0) {
             MonitorCommandBar()
                 .zIndex(1)
@@ -42,9 +43,10 @@ struct MonitorView: View {
 }
 
 struct MonitorCommandBar: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
+        @Bindable var model = model
         HStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")

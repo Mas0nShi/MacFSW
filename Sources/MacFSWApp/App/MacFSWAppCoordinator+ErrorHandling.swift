@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import Darwin
 import MacFSWAnalysis
 import MacFSWCore

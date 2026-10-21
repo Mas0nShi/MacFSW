@@ -1,9 +1,12 @@
 import Foundation
+import Observation
 import MacFSWCore
 
 @MainActor
-final class SessionStore: ObservableObject {
-    @Published var session: MacFSWResearchSession
+@Observable
+final class SessionStore {
+    var session: MacFSWResearchSession
+    @ObservationIgnored
     var eventStore: MacFSWSQLiteEventStore
 
     private let makeTemporaryEventStore: (MacFSWResearchSession) throws -> MacFSWSQLiteEventStore

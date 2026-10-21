@@ -2,7 +2,7 @@ import MarkdownView
 import SwiftUI
 
 struct AnalysisResultsView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         HStack(spacing: 0) {
@@ -24,7 +24,7 @@ struct AnalysisResultsView: View {
 }
 
 struct AnalysisHeaderView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         HStack(spacing: 12) {
@@ -108,7 +108,7 @@ struct AnalysisHeaderView: View {
 }
 
 struct AnalysisHistorySidebar: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -190,7 +190,7 @@ struct AnalysisHistoryRow: View {
 }
 
 struct AnalysisReportPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         Group {

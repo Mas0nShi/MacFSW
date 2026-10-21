@@ -2,7 +2,7 @@ import Darwin
 import SwiftUI
 
 struct SidebarView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,7 +34,7 @@ struct SidebarView: View {
 }
 
 struct SidebarPageSwitcher: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         HStack(spacing: 3) {
@@ -96,9 +96,10 @@ struct SidebarPageSwitcherItem: View {
 }
 
 struct ProcessFilterPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
+        @Bindable var model = model
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {

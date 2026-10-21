@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import Darwin
 import MacFSWAnalysis
 import MacFSWCore
@@ -7,9 +6,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-final class MacFSWAppCoordinator: ObservableObject {
-    @Published var selectedPage: MacFSWNavigationPage = .monitor
-    @Published var errorMessage: String?
+@Observable
+final class MacFSWAppCoordinator {
+    var selectedPage: MacFSWNavigationPage = .monitor
+    var errorMessage: String?
 
     let preferencesStore: AppPreferencesStore
     let processSidebarStore: ProcessSidebarStore
@@ -23,7 +23,7 @@ final class MacFSWAppCoordinator: ObservableObject {
     let logStore: AppLogStore
 
     let environment: MacFSWAppEnvironment
-    var storeCancellables: Set<AnyCancellable> = []
+    @ObservationIgnored
     var pendingCaptureStats: MacFSWCaptureStats?
 
     init(environment: MacFSWAppEnvironment = .live) {
@@ -46,7 +46,7 @@ final class MacFSWAppCoordinator: ObservableObject {
         )
         self.sessionStore = SessionStore(environment: environment, initialSession: initialSession)
         self.selectedPage = preferencesStore.defaultStartupPage
-        observeStores()
+        wireStoreCallbacks()
         logStore.record(.info, "App coordinator initialized.", category: "App")
     }
 

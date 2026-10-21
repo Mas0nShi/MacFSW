@@ -1,10 +1,12 @@
 import Foundation
+import Observation
 import MacFSWAnalysis
 
 @MainActor
-final class AnalysisTemplateStore: ObservableObject {
-    @Published private(set) var customTemplates: [MacFSWAnalysisPromptTemplate] = []
-    @Published var selectedTemplateID: UUID = MacFSWAnalysisPromptTemplateCatalog.defaultTemplate.id {
+@Observable
+final class AnalysisTemplateStore {
+    private(set) var customTemplates: [MacFSWAnalysisPromptTemplate] = []
+    var selectedTemplateID: UUID = MacFSWAnalysisPromptTemplateCatalog.defaultTemplate.id {
         didSet {
             guard !isLoading else {
                 return
@@ -13,11 +15,13 @@ final class AnalysisTemplateStore: ObservableObject {
         }
     }
 
+    @ObservationIgnored
     var onError: ((Error) -> Void)?
 
     let builtInTemplates = MacFSWAnalysisPromptTemplateCatalog.builtIns
 
     private let settingsStore: MacFSWSettingsStore
+    @ObservationIgnored
     private var isLoading = false
 
     init(settingsStore: MacFSWSettingsStore) {

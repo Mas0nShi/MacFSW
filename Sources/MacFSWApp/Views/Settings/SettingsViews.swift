@@ -93,9 +93,10 @@ struct SettingsView: View {
 }
 
 struct GeneralSettingsPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
+        @Bindable var model = model
         Form {
             Section("Startup") {
                 Picker("Default Page", selection: $model.defaultStartupPage) {
@@ -115,9 +116,10 @@ struct GeneralSettingsPane: View {
 }
 
 struct LogsSettingsPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
+        @Bindable var model = model
         Form {
             Section("Diagnostics") {
                 Toggle("Write diagnostic logs", isOn: $model.diagnosticLoggingEnabled)
@@ -171,7 +173,7 @@ struct LogsSettingsPane: View {
 }
 
 struct AnalysisSettingsPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         Form {
@@ -294,7 +296,7 @@ struct AnalysisSettingsPane: View {
 /// row is checked, and per-row buttons cover Select / Duplicate / Edit /
 /// Delete. Editing a built-in offers Duplicate & Edit instead.
 struct AnalysisTemplateList: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
     @State private var editing: MacFSWAnalysisPromptTemplate?
 
     var body: some View {
@@ -505,7 +507,7 @@ private struct PromptPlaceholderReference: View {
 
 
 struct CaptureSettingsPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         Form {

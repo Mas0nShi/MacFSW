@@ -1,30 +1,34 @@
 import Foundation
+import Observation
 import MacFSWAnalysis
 
 @MainActor
-final class AppPreferencesStore: ObservableObject {
-    @Published var llmSettings: MacFSWLLMSettings {
+@Observable
+final class AppPreferencesStore {
+    var llmSettings: MacFSWLLMSettings {
         didSet {
             persistLLMSettings()
         }
     }
 
-    @Published var defaultStartupPage: MacFSWNavigationPage {
+    var defaultStartupPage: MacFSWNavigationPage {
         didSet {
             defaults.set(defaultStartupPage.rawValue, forKey: Self.defaultStartupPageKey)
         }
     }
 
-    @Published var defaultIncludeExitedProcesses: Bool {
+    var defaultIncludeExitedProcesses: Bool {
         didSet {
             defaults.set(defaultIncludeExitedProcesses, forKey: Self.includeExitedProcessesDefaultKey)
         }
     }
 
+    @ObservationIgnored
     var onError: ((Error) -> Void)?
 
     private let settingsStore: MacFSWSettingsStore
     private let defaults: UserDefaults
+    @ObservationIgnored
     private var isLoading = false
     private static let includeExitedProcessesDefaultKey = "MacFSW.IncludeExitedProcesses.Default"
     private static let defaultStartupPageKey = "MacFSW.DefaultStartupPage"
