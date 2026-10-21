@@ -59,6 +59,8 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertEqual(recording.source, .capture)
         XCTAssertEqual(recording.events, 0)
         XCTAssertEqual(recording.captureState, .recording)
+        let progress = try await workspace.captureProgress()
+        XCTAssertEqual(progress.state, .recording)
 
         let stopped = try await workspace.stopCapture()
         XCTAssertEqual(stopped.captureState, .stopped)

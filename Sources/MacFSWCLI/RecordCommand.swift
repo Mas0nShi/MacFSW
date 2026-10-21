@@ -56,9 +56,18 @@ struct RecordCommand: AsyncParsableCommand {
         _ = try await workspace.startCapture(request)
         Self.log("Recording for up to \(duration)s; press Ctrl-C to stop early.")
 
-        while try await workspace.sessionInfo().captureState == .recording, !interrupt.received {
-            try await Task.sleep(for: .milliseconds(200))
+        let progress = ProgressLine()
+        let started = ContinuousClock.now
+        while !interrupt.received {
+            let (state, stats) = try await workspace.captureProgress()
+            guard state == .recording else {
+                break
+            }
+            let elapsed = Int((ContinuousClock.now - started).components.seconds)
+            progress.show("Recording \(elapsed)s / \(duration)s · \(stats.deliveredEvents.formatted()) events · \(stats.droppedEvents.formatted()) dropped")
+            try await Task.sleep(for: .milliseconds(250))
         }
+        progress.finish()
         let stopped = try await workspace.stopCapture()
         if stopped.captureState == .failed {
             Self.log("Capture ended with an error; saving what was recorded.")
@@ -70,6 +79,26 @@ struct RecordCommand: AsyncParsableCommand {
 
     private static func log(_ message: String) {
         FileHandle.standardError.write(Data((message + "\n").utf8))
+    }
+}
+
+/// A single status line rewritten in place on an interactive terminal;
+/// silent when stderr is redirected, so logs stay clean.
+private struct ProgressLine {
+    private let isTerminal = isatty(STDERR_FILENO) == 1
+
+    func show(_ text: String) {
+        guard isTerminal else {
+            return
+        }
+        FileHandle.standardError.write(Data("\r\u{1B}[2K\(text)".utf8))
+    }
+
+    func finish() {
+        guard isTerminal else {
+            return
+        }
+        FileHandle.standardError.write(Data("\n".utf8))
     }
 }
 

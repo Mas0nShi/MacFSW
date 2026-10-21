@@ -129,6 +129,13 @@ public actor Workspace {
         SessionQueries(store: try requireActive().capture.store)
     }
 
+    /// Recording state and counters without touching the event store,
+    /// cheap enough to poll while recording.
+    public func captureProgress() async throws -> (state: MacFSWCaptureState, stats: MacFSWCaptureStats) {
+        let capture = try requireActive().capture
+        return (await capture.state, await capture.stats)
+    }
+
     public func sessionInfo() async throws -> SessionInfo {
         let session = try requireActive()
         let stats = await session.capture.stats
