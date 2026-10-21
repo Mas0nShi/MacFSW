@@ -49,8 +49,16 @@ public actor MacFSWSQLiteEventStore {
         self.ownerLock = ownerLock
 
         var configuration = Configuration()
+        let isTemporary = ownedDirectoryURL != nil
         configuration.prepareDatabase { db in
             try db.execute(sql: "PRAGMA busy_timeout = 5000")
+            if isTemporary {
+                // A temporary store is discarded after a crash anyway, so it
+                // skips durability work. Not WAL: that mode is stored in the
+                // file header and would make saved copies unopenable read-only.
+                try db.execute(sql: "PRAGMA journal_mode = MEMORY")
+                try db.execute(sql: "PRAGMA synchronous = OFF")
+            }
         }
         switch mode {
         case .writable(let session):
@@ -149,7 +157,13 @@ public actor MacFSWSQLiteEventStore {
         }
         nextSequence = (sequenced.last?.sequence ?? (nextSequence - 1)) + 1
 
-        return MacFSWEventAppendResult(events: sequenced, stats: try await stats())
+        // Sequences start at 1 and only `clear()` deletes (resetting them), so
+        // the count is known without scanning the table on every batch.
+        let stats = MacFSWCaptureStats(
+            deliveredEvents: nextSequence - 1,
+            lastEventAt: sequenced.last.map { Date(timeIntervalSince1970: TimeInterval($0.timestampNS) / 1_000_000_000) }
+        )
+        return MacFSWEventAppendResult(events: sequenced, stats: stats)
     }
 
     public func clear() async throws {

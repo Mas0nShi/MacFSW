@@ -57,11 +57,10 @@ extension MacFSWSQLiteEventStore {
         ].compactMap { $0 }.joined(separator: " ")
         let flagsText = String(event.flags)
         let fileIDText = event.fileID.map(String.init)
-        let parametersJSON = String(data: try JSONEncoder.macfsw.encode(event.parameters), encoding: .utf8) ?? "[]"
+        let parametersJSON = String(decoding: try parametersEncoder.encode(event.parameters), as: UTF8.self)
         let appleControlled = event.process.isAppleControlledForStorage
 
-        try db.execute(
-            sql: """
+        try db.cachedStatement(sql: """
             INSERT INTO events (
                 id, sequence, timestampNS, eventType, operationClass,
                 pid, pidText, auditToken, executablePath,
@@ -78,8 +77,7 @@ extension MacFSWSQLiteEventStore {
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
-            """,
-            arguments: [
+            """).execute(arguments: [
                 event.id.uuidString,
                 Int64(event.sequence),
                 Int64(event.timestampNS),
@@ -119,18 +117,15 @@ extension MacFSWSQLiteEventStore {
                 String(event.timestampNS),
                 event.eventType.isMutation ? 1 : 0,
                 event.eventType.isMutation.queryTextForStorage,
-            ]
-        )
+            ])
 
-        try db.execute(
-            sql: """
+        try db.cachedStatement(sql: """
             INSERT INTO event_fts (
                 rowid, any_text, process_text, executable_text, path_text,
                 signing_text, team_text
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            arguments: [
+            """).execute(arguments: [
                 Int64(event.sequence),
                 sourceTextValues,
                 event.process.processName,
@@ -138,9 +133,12 @@ extension MacFSWSQLiteEventStore {
                 [event.targetPath, sourcePath].compactMap { $0 }.joined(separator: " "),
                 signingID ?? "",
                 teamID ?? "",
-            ]
-        )
+            ])
     }
+
+    /// One encoder for every insert; `JSONEncoder.macfsw` builds a new one
+    /// per access. Parameters carry no dates, so the strategy is irrelevant.
+    private static let parametersEncoder = JSONEncoder()
 
     private static let schemaMigration = "create_v1"
 
