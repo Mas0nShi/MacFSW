@@ -385,8 +385,11 @@ EOF
   verify_entitlement "$APP_BUNDLE" "com.apple.developer.system-extension.install"
   verify_entitlement "$EXT_BUNDLE" "com.apple.developer.endpoint-security.client"
 
-  if ! codesign -d "$APP_BUNDLE/Contents/MacOS/$CLI_EXECUTABLE" 2>&1 | grep -q "^Identifier=$CLI_IDENTIFIER$"; then
-    echo "The macfsw CLI is not signed with identifier $CLI_IDENTIFIER; the Endpoint Extension will refuse it." >&2
+  # The same requirement XPCClientPolicy has the extension enforce.
+  CLI_REQUIREMENT="identifier \"$CLI_IDENTIFIER\" and anchor apple generic and certificate leaf[subject.OU] = \"$DEVELOPMENT_TEAM\""
+  if ! codesign --verify --strict -R="$CLI_REQUIREMENT" "$APP_BUNDLE/Contents/MacOS/$CLI_EXECUTABLE"; then
+    echo "The macfsw CLI does not satisfy: $CLI_REQUIREMENT" >&2
+    echo "The Endpoint Extension will refuse it." >&2
     exit 3
   fi
 
