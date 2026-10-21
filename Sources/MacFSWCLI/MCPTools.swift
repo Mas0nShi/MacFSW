@@ -13,9 +13,14 @@ extension MacFSWMCPServer {
         Tool(
             name: "start_capture",
             description: """
-            Start recording file-system events. Creates a new session unless this server is already \
-            recording into one; a session opened from a file is closed first and never modified. \
-            Recording stops by itself after duration_seconds (default 600).
+            Start recording file-system events and return immediately; recording continues in the \
+            background. Then trigger the behavior to observe and query results at any time with \
+            summarize_events or query_events — they always reflect everything recorded so far. The \
+            system produces background events constantly, so narrow queries with path:, process:, or \
+            op: terms, or limit the capture with target_* and include_paths. Call stop_capture when \
+            done; recording also stops by itself after duration_seconds (default 600). Creates a new \
+            session unless this server is already recording into one; a session opened from a file is \
+            closed first and never modified.
             """,
             inputSchema: object([
                 "profile": [

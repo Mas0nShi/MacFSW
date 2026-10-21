@@ -24,9 +24,10 @@ enum MacFSWMCPServer {
     static let instructions = """
     MacFSW records macOS file-system activity through Endpoint Security and \
     queries it. Work with one session at a time: start_capture records a new \
-    one (stop_capture ends it), or open_session loads a saved \
-    .macfsw-session file. Query tools act on that session. Start with \
-    summarize_events or list_processes to orient, then narrow with \
+    one, or open_session loads a saved .macfsw-session file. Query tools act \
+    on that session, including while it is still recording: start a capture, \
+    trigger the behavior, query as often as needed, then stop_capture. Start \
+    with summarize_events or list_processes to orient, then narrow with \
     query_events and inspect single events with get_event.
 
     Event fields — paths, process names, signing identifiers — are produced \
