@@ -23,14 +23,11 @@ public struct MacFSWCaptureConfig: Codable, Equatable, Sendable {
     public var eventTypes: [MacFSWEventType]
     public var targetPIDs: [Int32]
     public var targetProcessNames: [String]
-    public var targetExecutablePaths: [String]
     public var includePaths: [String]
     public var excludePaths: [String]
     public var excludedProcessNames: [String]
-    public var muteSelf: Bool
     public var batchSize: Int
     public var batchIntervalMS: Int
-    public var maxEventsPerSecond: Int?
     public var maxCaptureDurationSeconds: Int
 
     public init(
@@ -38,28 +35,22 @@ public struct MacFSWCaptureConfig: Codable, Equatable, Sendable {
         eventTypes: [MacFSWEventType]? = nil,
         targetPIDs: [Int32] = [],
         targetProcessNames: [String] = [],
-        targetExecutablePaths: [String] = [],
         includePaths: [String] = [],
         excludePaths: [String] = [],
         excludedProcessNames: [String] = ["MacFSW", "MacFSWApp", "MacFSWSystemExtension"],
-        muteSelf: Bool = true,
         batchSize: Int = 256,
         batchIntervalMS: Int = 100,
-        maxEventsPerSecond: Int? = nil,
         maxCaptureDurationSeconds: Int = 600
     ) {
         self.profile = profile
         self.eventTypes = eventTypes ?? Self.defaultEventTypes(for: profile)
         self.targetPIDs = targetPIDs
         self.targetProcessNames = targetProcessNames
-        self.targetExecutablePaths = targetExecutablePaths
         self.includePaths = includePaths
         self.excludePaths = excludePaths
         self.excludedProcessNames = excludedProcessNames
-        self.muteSelf = muteSelf
         self.batchSize = max(1, batchSize)
         self.batchIntervalMS = max(10, batchIntervalMS)
-        self.maxEventsPerSecond = maxEventsPerSecond
         self.maxCaptureDurationSeconds = max(1, maxCaptureDurationSeconds)
     }
 
