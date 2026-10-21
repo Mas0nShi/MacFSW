@@ -22,7 +22,7 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
             connection.remoteObjectInterface = MacFSWXPCInterfaces.captureServiceInterface()
             let state = XPCRequestState(connection: connection, continuation: continuation, keepsConnection: false)
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                state.finish(.failure(error))
+                state.finish(.failure(MacFSWClientError(connectionError: error)))
             } as? MacFSWCaptureXPCProtocol
 
             guard let proxy else {
@@ -60,6 +60,7 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
         return try await withCheckedThrowingContinuation { continuation in
             let state = XPCRequestState(connection: connection, continuation: continuation, keepsConnection: true)
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                let error = MacFSWClientError(connectionError: error)
                 onFinish(error)
                 state.finish(.failure(error))
             } as? MacFSWCaptureXPCProtocol
@@ -118,6 +119,18 @@ public enum MacFSWClientError: Error, LocalizedError, Sendable {
     case xpcUnavailable(String)
     case invalidResponse
     case backend(String)
+
+    /// XPC reports a refused or dropped connection as a bare Cocoa error
+    /// that names only the service; anything else passes through.
+    init(connectionError error: any Error) {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain,
+           nsError.code == NSXPCConnectionInterrupted || nsError.code == NSXPCConnectionInvalid {
+            self = .xpcUnavailable("The Endpoint Extension is not running or refused this connection.")
+        } else {
+            self = .backend(error.userFacingMessage)
+        }
+    }
 
     public var errorDescription: String? {
         switch self {

@@ -67,21 +67,10 @@ public struct ExtensionInspector: Sendable {
         if bundledVersion != nil, activated == nil {
             return status(.notInstalled, running: nil, "The Endpoint Extension is not installed. \(Self.setupHint)")
         }
-        return status(.unreachable, running: activated, "\(Self.describe(error)) \(Self.setupHint)")
+        return status(.unreachable, running: activated, "\(error.userFacingMessage) \(Self.setupHint)")
     }
 
     private func status(_ state: ExtensionStatus.State, running: MacFSWComponentVersion?, _ message: String) -> ExtensionStatus {
         ExtensionStatus(state: state, runningVersion: running?.description, bundledVersion: bundledVersion?.description, message: message)
-    }
-
-    /// XPC reports a refused or dropped connection as a bare Cocoa error
-    /// that names only the service.
-    private static func describe(_ error: any Error) -> String {
-        let nsError = error as NSError
-        if nsError.domain == NSCocoaErrorDomain,
-           nsError.code == NSXPCConnectionInterrupted || nsError.code == NSXPCConnectionInvalid {
-            return "The Endpoint Extension is not running or refused this connection."
-        }
-        return error.userFacingMessage
     }
 }
