@@ -222,7 +222,9 @@ Use:
 File > Open Session...
 ```
 
-Opening a saved session does not start capture automatically.
+Opened sessions are read-only: MacFSW never writes to the file you opened. Record and Clear are unavailable; start a new session to record. Save Session writes a separate copy, which is how you rename or re-save an opened session.
+
+Session files must come from a MacFSW version with the same session format. Files in another format are rejected rather than converted.
 
 ### 6.4 Temporary Session Storage
 

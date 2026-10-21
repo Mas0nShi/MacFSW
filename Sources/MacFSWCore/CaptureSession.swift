@@ -7,6 +7,14 @@ import Foundation
 /// delivery order, and fans out what changed to any number of observers.
 /// Session metadata (`MacFSWResearchSession`) stays with the caller; the
 /// engine only needs the capture config to start and the metadata to save.
+public enum MacFSWCaptureSessionError: Error, LocalizedError, Equatable, Sendable {
+    case readOnly
+
+    public var errorDescription: String? {
+        "This session was opened from a file and is read-only. Start a new session to record."
+    }
+}
+
 public actor MacFSWCaptureSession {
     public enum Update: Sendable {
         /// Events were appended to the store, already sequenced.
@@ -76,6 +84,9 @@ public actor MacFSWCaptureSession {
     /// accepted it. Throws if the stream cannot be opened. Recording stops
     /// on its own after `config.maxCaptureDurationSeconds`.
     public func start(config: MacFSWCaptureConfig) async throws {
+        guard !store.isReadOnly else {
+            throw MacFSWCaptureSessionError.readOnly
+        }
         guard state != .connecting, handle == nil else {
             return
         }
@@ -150,6 +161,9 @@ public actor MacFSWCaptureSession {
 
     /// Deletes every event; the session stays usable.
     public func clear() async throws {
+        guard !store.isReadOnly else {
+            throw MacFSWCaptureSessionError.readOnly
+        }
         try await store.clear()
         stats = MacFSWCaptureStats()
     }

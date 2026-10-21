@@ -20,6 +20,7 @@ public enum MacFSWSQLiteStoreError: Error, LocalizedError, Sendable {
 
 public actor MacFSWSQLiteEventStore {
     public nonisolated let url: URL
+    public nonisolated let isReadOnly: Bool
     private let dbQueue: DatabaseQueue
     private let ownedDirectoryURL: URL?
     private let ownerLock: TemporaryDirectoryLock?
@@ -45,39 +46,48 @@ public actor MacFSWSQLiteEventStore {
         "CREATE INDEX IF NOT EXISTS idx_events_operation_class_time ON events(operationClass, timestampNS, sequence)",
     ]
 
-    public init(
-        url: URL,
-        createIfNeeded: Bool = true,
-        defaultSession: MacFSWResearchSession? = nil
-    ) throws {
-        try self.init(url: url, createIfNeeded: createIfNeeded, defaultSession: defaultSession, ownedDirectoryURL: nil, ownerLock: nil)
+    /// Opens the store at `url` for writing, creating it — schema and
+    /// session row — when it does not exist yet.
+    public init(url: URL, defaultSession: MacFSWResearchSession = MacFSWResearchSession()) throws {
+        try self.init(url: url, mode: .writable(defaultSession), ownedDirectoryURL: nil, ownerLock: nil)
     }
 
-    private init(
-        url: URL,
-        createIfNeeded: Bool,
-        defaultSession: MacFSWResearchSession?,
-        ownedDirectoryURL: URL?,
-        ownerLock: TemporaryDirectoryLock?
-    ) throws {
+    /// Opens a saved session without ever writing to it. Files that do not
+    /// carry the current schema are rejected rather than upgraded.
+    public static func openReadOnly(_ url: URL) throws -> MacFSWSQLiteEventStore {
+        try MacFSWSQLiteEventStore(url: url, mode: .readOnly, ownedDirectoryURL: nil, ownerLock: nil)
+    }
+
+    private enum Mode {
+        case writable(MacFSWResearchSession)
+        case readOnly
+    }
+
+    private init(url: URL, mode: Mode, ownedDirectoryURL: URL?, ownerLock: TemporaryDirectoryLock?) throws {
         self.url = url
         self.ownedDirectoryURL = ownedDirectoryURL
         self.ownerLock = ownerLock
-        if !createIfNeeded {
-            try Self.validateSQLiteHeader(at: url)
-        }
 
         var configuration = Configuration()
         configuration.prepareDatabase { db in
-            try db.execute(sql: "PRAGMA foreign_keys = ON")
             try db.execute(sql: "PRAGMA busy_timeout = 5000")
         }
-        self.dbQueue = try DatabaseQueue(path: url.path, configuration: configuration)
-        try Self.migrate(dbQueue)
-        if createIfNeeded {
-            try Self.ensureSession(defaultSession ?? MacFSWResearchSession(), dbQueue: dbQueue)
+        switch mode {
+        case .writable(let session):
+            isReadOnly = false
+            dbQueue = try DatabaseQueue(path: url.path, configuration: configuration)
+            try Self.migrate(dbQueue)
+            try Self.ensureSession(session, dbQueue: dbQueue)
+        case .readOnly:
+            isReadOnly = true
+            try Self.validateSQLiteHeader(at: url)
+            configuration.readonly = true
+            dbQueue = try DatabaseQueue(path: url.path, configuration: configuration)
+            guard try Self.hasCurrentSchema(dbQueue) else {
+                throw MacFSWSQLiteStoreError.unsupportedFormat(url)
+            }
         }
-        self.nextSequence = try Self.readNextSequence(dbQueue)
+        nextSequence = try Self.readNextSequence(dbQueue)
     }
 
     public static func temporary(session: MacFSWResearchSession = MacFSWResearchSession()) throws -> MacFSWSQLiteEventStore {
@@ -87,8 +97,7 @@ public actor MacFSWSQLiteEventStore {
         let lock = try TemporaryDirectoryLock(holding: directory)
         return try MacFSWSQLiteEventStore(
             url: directory.appendingPathComponent("session.sqlite"),
-            createIfNeeded: true,
-            defaultSession: session,
+            mode: .writable(session),
             ownedDirectoryURL: directory,
             ownerLock: lock
         )
@@ -815,9 +824,21 @@ public actor MacFSWSQLiteEventStore {
         )
     }
 
+    private static let schemaMigration = "create_v1"
+
+    private static func hasCurrentSchema(_ dbQueue: DatabaseQueue) throws -> Bool {
+        try dbQueue.read { db in
+            guard try db.tableExists("grdb_migrations"), try db.tableExists("events"), try db.tableExists("session") else {
+                return false
+            }
+            let applied = try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations")
+            return applied == [schemaMigration]
+        }
+    }
+
     private static func migrate(_ dbQueue: DatabaseQueue) throws {
         var migrator = DatabaseMigrator()
-        migrator.registerMigration("create_v1") { db in
+        migrator.registerMigration(schemaMigration) { db in
             try db.execute(sql: """
             CREATE TABLE IF NOT EXISTS session (
                 id TEXT PRIMARY KEY NOT NULL,

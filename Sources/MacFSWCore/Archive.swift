@@ -6,7 +6,7 @@ public enum MacFSWArchiveError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .unsupportedFormat(let url):
-            "Unsupported MacFSW file format: \(url.lastPathComponent)."
+            "\(url.lastPathComponent) is not a session file this version of MacFSW can open."
         }
     }
 }
@@ -14,18 +14,28 @@ public enum MacFSWArchiveError: Error, LocalizedError, Sendable {
 public enum MacFSWSessionArchive {
     public static let nativeExtension = "macfsw-session"
 
+    /// Writes `session` and every event in `store` to a new file at `url`.
+    /// A read-only store is copied first and the copy takes the metadata,
+    /// so the opened file stays untouched.
     public static func saveSession(
         _ session: MacFSWResearchSession,
         from store: MacFSWSQLiteEventStore,
         to url: URL
     ) async throws {
-        try await store.saveSessionMetadata(session)
-        try await store.copyDatabase(to: url)
+        if store.isReadOnly {
+            try await store.copyDatabase(to: url)
+            try await MacFSWSQLiteEventStore(url: url).saveSessionMetadata(session)
+        } else {
+            try await store.saveSessionMetadata(session)
+            try await store.copyDatabase(to: url)
+        }
     }
 
+    /// Opens a saved session read-only; files from other MacFSW schema
+    /// versions are rejected.
     public static func openSessionStore(from url: URL) throws -> MacFSWSQLiteEventStore {
         do {
-            return try MacFSWSQLiteEventStore(url: url, createIfNeeded: false)
+            return try MacFSWSQLiteEventStore.openReadOnly(url)
         } catch MacFSWSQLiteStoreError.unsupportedFormat {
             throw MacFSWArchiveError.unsupportedFormat(url)
         }

@@ -134,7 +134,10 @@ final class MacFSWAppCoordinator {
     }
 
     var captureStatusDetail: String {
-        switch session.captureState {
+        if session.isReadOnly {
+            return "Opened session, read-only. Start a new session to record."
+        }
+        return switch session.captureState {
         case .recording:
             monitor.followMode == .live ? "Following live events." : "View is paused; capture is still running."
         case .connecting:

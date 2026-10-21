@@ -23,6 +23,8 @@ The System Extension must remain a minimal sensor. It should not persist data, m
 
 Session metadata (`MacFSWResearchSession`) stays with the caller. The app and the CLI never share a live session; recordings move between them as `.macfsw-session` files.
 
+Saved sessions open read-only (`MacFSWSQLiteEventStore.openReadOnly`): no migrations run, files without the current schema are rejected, and the engine refuses to record into or clear them. Saving a read-only session copies the file and writes the metadata into the copy.
+
 Temporary stores live in `macfsw-<uuid>` directories under the temporary directory. The owning process holds an exclusive `flock` on a marker file for the store's lifetime, and `cleanupStaleTemporaryStores()` deletes only directories whose lock it can take, so an app launch never deletes a running CLI's session.
 
 ### Query subsystem layering

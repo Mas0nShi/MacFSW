@@ -57,6 +57,9 @@ extension MacFSWAppCoordinator {
     /// Clears captured events but keeps the session, its settings, and the
     /// current query.
     func clearView() {
+        guard !session.isReadOnly else {
+            return
+        }
         monitor.cancelAllWork()
         Task {
             do {
@@ -99,6 +102,9 @@ extension MacFSWAppCoordinator {
     // MARK: - Capture
 
     func recordButtonTapped() {
+        guard !session.isReadOnly else {
+            return
+        }
         if session.captureState == .recording {
             stopCapture()
             return

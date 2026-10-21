@@ -11,6 +11,8 @@ final class SessionStore {
     private(set) var captureState: MacFSWCaptureState = .idle
     var captureHealth = MacFSWCaptureHealth()
     private(set) var captureStats = MacFSWCaptureStats()
+    /// Sessions opened from a file are read-only: no recording, no clearing.
+    private(set) var isReadOnly = false
 
     @ObservationIgnored
     private(set) var capture: MacFSWCaptureSession
@@ -111,6 +113,7 @@ final class SessionStore {
         pendingStats = nil
         capture = newCapture
         research = newResearch
+        isReadOnly = newCapture.store.isReadOnly
         captureStats = stats
         captureState = .idle
         try await oldCapture.close()

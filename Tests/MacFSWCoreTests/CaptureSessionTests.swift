@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import XCTest
 @testable import MacFSWCore
 
@@ -274,5 +275,96 @@ final class CaptureHealthVersionTests: XCTestCase {
         let current = MacFSWCaptureHealth(extensionVersion: MacFSWComponentVersion(shortVersion: "0.1.8", build: "14"))
         let roundTripped = try JSONDecoder.macfsw.decode(MacFSWCaptureHealth.self, from: JSONEncoder.macfsw.encode(current))
         XCTAssertEqual(roundTripped.extensionVersion?.description, "0.1.8 (14)")
+    }
+}
+
+final class ReadOnlySessionFileTests: XCTestCase {
+    private var directory: URL!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macfsw-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testOpenedSessionsAreNeverWritten() async throws {
+        let url = try await makeSessionFile(name: "Original", events: 2)
+        let before = try Data(contentsOf: url)
+
+        let (session, metadata) = try await MacFSWCaptureSession.open(url, client: NeverCalledClient())
+        XCTAssertTrue(session.store.isReadOnly)
+        XCTAssertEqual(metadata.name, "Original")
+        do {
+            try await session.start(config: MacFSWCaptureConfig())
+            XCTFail("expected readOnly")
+        } catch let error as MacFSWCaptureSessionError {
+            XCTAssertEqual(error, .readOnly)
+        }
+        do {
+            try await session.clear()
+            XCTFail("expected readOnly")
+        } catch let error as MacFSWCaptureSessionError {
+            XCTAssertEqual(error, .readOnly)
+        }
+
+        let copy = directory.appendingPathComponent("copy.macfsw-session")
+        try await session.save(MacFSWResearchSession(name: "Renamed"), to: copy)
+        try await session.close()
+
+        XCTAssertEqual(try Data(contentsOf: url), before, "the opened file must be byte-for-byte unchanged")
+        let (reopened, renamed) = try await MacFSWCaptureSession.open(copy, client: NeverCalledClient())
+        XCTAssertEqual(renamed.name, "Renamed")
+        let count = try await reopened.store.count(matching: MacFSWEventQuery())
+        XCTAssertEqual(count, 2)
+    }
+
+    func testFilesWithoutTheCurrentSchemaAreRejected() throws {
+        let url = directory.appendingPathComponent("other.macfsw-session")
+        try makeForeignSQLiteFile(at: url)
+        XCTAssertThrowsError(try MacFSWSessionArchive.openSessionStore(from: url)) { error in
+            XCTAssertTrue(error is MacFSWArchiveError, "\(error)")
+        }
+    }
+
+    private func makeSessionFile(name: String, events: Int) async throws -> URL {
+        let store = try MacFSWSQLiteEventStore.temporary()
+        let process = MacFSWProcessIdentity(pid: 3, auditToken: "t", executablePath: "/bin/t", processName: "t")
+        _ = try await store.appendReturningEvents((0..<events).map {
+            MacFSWFileEvent(eventType: .write, process: process, targetPath: "/tmp/\($0)")
+        })
+        let url = directory.appendingPathComponent("\(name).macfsw-session")
+        try await MacFSWSessionArchive.saveSession(MacFSWResearchSession(name: name), from: store, to: url)
+        try await store.cleanupBackingStore()
+        return url
+    }
+}
+
+/// A valid SQLite file that is not a MacFSW session.
+private func makeForeignSQLiteFile(at url: URL) throws {
+    var db: OpaquePointer?
+    guard sqlite3_open(url.path, &db) == SQLITE_OK else {
+        throw POSIXError(.EIO)
+    }
+    defer { sqlite3_close(db) }
+    sqlite3_exec(db, "CREATE TABLE events (id TEXT)", nil, nil, nil)
+}
+
+private struct NeverCalledClient: MacFSWCaptureClient {
+    func health() async throws -> MacFSWCaptureHealth {
+        XCTFail("unexpected health check")
+        return MacFSWCaptureHealth()
+    }
+
+    func openCaptureStream(
+        config: MacFSWCaptureConfig,
+        onBatch: @escaping @Sendable (MacFSWEventBatch) -> Void,
+        onFinish: @escaping @Sendable ((any Error)?) -> Void
+    ) async throws -> MacFSWCaptureHandle {
+        XCTFail("a read-only session must not open a capture stream")
+        throw MacFSWCaptureSessionError.readOnly
     }
 }

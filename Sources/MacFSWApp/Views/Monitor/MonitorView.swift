@@ -135,6 +135,8 @@ struct MonitorCommandBar: View {
             } label: {
                 Label(recordButtonTitle, systemImage: recordButtonSymbol)
             }
+            .disabled(model.session.isReadOnly)
+            .help(model.session.isReadOnly ? Self.readOnlyHelp : "")
 
             if model.shouldShowJumpToLive {
                 Button {
@@ -149,7 +151,8 @@ struct MonitorCommandBar: View {
             } label: {
                 Label("Clear", systemImage: "trash")
             }
-            .disabled(model.monitor.visibleEventCount == 0 && model.session.captureStats.deliveredEvents == 0)
+            .disabled(model.session.isReadOnly || (model.monitor.visibleEventCount == 0 && model.session.captureStats.deliveredEvents == 0))
+            .help(model.session.isReadOnly ? Self.readOnlyHelp : "")
 
         }
         .buttonStyle(.bordered)
@@ -160,6 +163,8 @@ struct MonitorCommandBar: View {
             Divider()
         }
     }
+
+    private static let readOnlyHelp = "Opened sessions are read-only. Start a new session (⌘N) to record."
 
     private var recordButtonTitle: String {
         if model.session.captureState == .recording {
