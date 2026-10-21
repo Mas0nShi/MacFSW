@@ -14,15 +14,15 @@ extension MacFSWAppCoordinator {
     }
 
     func handleCaptureStartFailure(_ error: Error) {
-        guard !isCancellationError(error) else {
+        guard !ErrorPresentation.isCancellationError(error) else {
             captureState = .idle
             return
         }
-        let message = userFacingMessage(error)
+        let message = error.userFacingMessage
         logStore.record(.error, message, category: "Capture", error: error)
         errorMessage = message
 
-        if isXPCConnectionFailure(error) {
+        if ErrorPresentation.isXPCConnectionFailure(error) {
             systemExtensionStatusStore.applyXPCFailure(message: message)
             captureHealth = MacFSWCaptureHealth(
                 state: .degraded,
@@ -31,7 +31,7 @@ extension MacFSWAppCoordinator {
                 message: message
             )
         }
-        if isFullDiskAccessError(message) {
+        if ErrorPresentation.isFullDiskAccessError(message) {
             systemExtensionStatusStore.applyFullDiskAccessFailure(message: message)
             captureHealth = MacFSWCaptureHealth(
                 state: .degraded,
@@ -43,33 +43,17 @@ extension MacFSWAppCoordinator {
         }
     }
 
-    func isFullDiskAccessError(_ message: String) -> Bool {
-        ErrorPresentation.isFullDiskAccessError(message)
-    }
-
-    func isXPCConnectionFailure(_ error: Error) -> Bool {
-        ErrorPresentation.isXPCConnectionFailure(error)
-    }
-
     func reportError(
         _ error: Error,
         category: String = "Error",
         metadata: [String: String] = [:]
     ) {
-        guard !isCancellationError(error) else {
+        guard !ErrorPresentation.isCancellationError(error) else {
             return
         }
-        let message = userFacingMessage(error)
+        let message = error.userFacingMessage
         logStore.record(.error, message, category: category, error: error, metadata: metadata)
         errorMessage = message
-    }
-
-    func isCancellationError(_ error: Error) -> Bool {
-        ErrorPresentation.isCancellationError(error)
-    }
-
-    func userFacingMessage(_ error: Error) -> String {
-        ErrorPresentation.userFacingMessage(error)
     }
 
     func openLogsFolder() {

@@ -66,10 +66,6 @@ extension MacFSWAppCoordinator {
         }
     }
 
-    func visibleCount(totalCount: Int, query: MacFSWEventQuery) -> Int {
-        query.visibleCount(totalCount: totalCount)
-    }
-
     func cacheAppendedRows(
         _ summaries: [MacFSWEventRowSummary],
         previousCount: Int,

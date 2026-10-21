@@ -154,7 +154,7 @@ extension MacFSWAppCoordinator {
         activeSnapshot = snapshot
         totalMatchingEventCount = snapshot.totalCount
         self.visibleEventCount = snapshot.visibleCount
-        self.operationSummaries = self.operationSummaries(from: operationSummaries)
+        self.operationSummaries = OperationSummaryReducer.operationSummaries(from: operationSummaries)
 
         rowCache.removeAll(keepingCapacity: true)
         loadedRowPages.removeAll(keepingCapacity: true)
@@ -202,7 +202,7 @@ extension MacFSWAppCoordinator {
                     guard let self, self.queryGeneration == generation else {
                         return
                     }
-                    self.operationSummaries = self.operationSummaries(from: summaries)
+                    self.operationSummaries = OperationSummaryReducer.operationSummaries(from: summaries)
                     self.operationSummaryTask = nil
                     self.lastUpdatedAt = Date()
                 }

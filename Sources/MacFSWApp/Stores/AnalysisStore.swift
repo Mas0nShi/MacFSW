@@ -241,7 +241,7 @@ final class AnalysisStore: ObservableObject {
                     if ErrorPresentation.isCancellationError(error) {
                         self.statusText = self.streamingMarkdown.isEmpty ? "Analysis cancelled." : "Analysis cancelled. Partial output is still visible."
                     } else {
-                        self.statusText = ErrorPresentation.userFacingMessage(error)
+                        self.statusText = error.userFacingMessage
                         self.runError = Self.analysisError(from: error, settings: settings)
                         reportError(error)
                     }

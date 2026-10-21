@@ -132,10 +132,6 @@ extension MacFSWAppCoordinator {
         captureState == .recording && ((followMode != .live && unseenEventCount > 0) || !isViewingLiveEdge)
     }
 
-    var jumpToLiveTitle: String {
-        "Jump to Live"
-    }
-
     var shouldShowInspector: Bool {
         selectedEventID != nil || selectedEvent != nil || selectedEventIsLoading
     }

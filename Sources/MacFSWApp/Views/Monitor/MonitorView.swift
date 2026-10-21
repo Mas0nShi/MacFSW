@@ -138,7 +138,7 @@ struct MonitorCommandBar: View {
                 Button {
                     model.jumpToLive()
                 } label: {
-                    Label(model.jumpToLiveTitle, systemImage: "arrow.down.to.line")
+                    Label("Jump to Live", systemImage: "arrow.down.to.line")
                 }
             }
 

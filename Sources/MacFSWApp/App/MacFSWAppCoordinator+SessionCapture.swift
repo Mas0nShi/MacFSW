@@ -87,15 +87,15 @@ extension MacFSWAppCoordinator {
             let health = try await captureStore.refreshHealth()
             systemExtensionStatusStore.applyHealth(health)
         } catch {
-            guard !isCancellationError(error) else {
+            guard !ErrorPresentation.isCancellationError(error) else {
                 return
             }
-            systemExtensionStatusStore.applyHealthRefreshFailure(message: userFacingMessage(error))
+            systemExtensionStatusStore.applyHealthRefreshFailure(message: error.userFacingMessage)
             captureHealth = MacFSWCaptureHealth(
                 state: .degraded,
                 endpointSecurityAvailable: true,
                 endpointSecurityAuthorized: false,
-                message: userFacingMessage(error)
+                message: error.userFacingMessage
             )
             reportError(error)
         }

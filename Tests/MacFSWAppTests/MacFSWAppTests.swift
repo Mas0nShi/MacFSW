@@ -91,7 +91,7 @@ final class MacFSWAppTests: XCTestCase {
         XCTAssertTrue(ErrorPresentation.isFullDiskAccessError("ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED rawValue: 4"))
         XCTAssertTrue(ErrorPresentation.isFullDiskAccessError("Needs Full Disk Access"))
         XCTAssertTrue(ErrorPresentation.isCancellationError(CancellationError()))
-        XCTAssertFalse(ErrorPresentation.userFacingMessage(TestPlainError()).isEmpty)
+        XCTAssertFalse(TestPlainError().userFacingMessage.isEmpty)
     }
 
     @MainActor

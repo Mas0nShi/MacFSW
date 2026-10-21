@@ -46,7 +46,7 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
             )
             reply(try encoder.encode(response), nil)
         } catch {
-            reply(nil, userFacingMessage(error))
+            reply(nil, error.userFacingMessage)
         }
     }
 
@@ -60,7 +60,7 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
         do {
             reply(try encoder.encode(health), nil)
         } catch {
-            reply(nil, userFacingMessage(error))
+            reply(nil, error.userFacingMessage)
         }
     }
 
@@ -77,7 +77,7 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
         do {
             subscriber.eventBatch(try encoder.encode(batch))
         } catch {
-            stopActiveCapture(errorMessage: userFacingMessage(error))
+            stopActiveCapture(errorMessage: error.userFacingMessage)
         }
     }
 
@@ -92,11 +92,4 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
         capture?.stop()
         subscriber?.captureFinished(errorMessage)
     }
-}
-
-private func userFacingMessage(_ error: Error) -> String {
-    if let localized = error as? LocalizedError, let description = localized.errorDescription {
-        return description
-    }
-    return String(describing: error)
 }

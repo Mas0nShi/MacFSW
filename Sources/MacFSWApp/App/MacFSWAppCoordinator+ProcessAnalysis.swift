@@ -41,40 +41,8 @@ extension MacFSWAppCoordinator {
         selectedAnalysisProcessID = nil
     }
 
-    static func lifecycle(for pid: Int32) -> MacFSWProcessLifecycle {
-        ProcessSummaryReducer.lifecycle(for: pid)
-    }
-
-    func processGroups(from summaries: [MacFSWProcessSummary]) -> [MacFSWProcessGroupSummary] {
-        ProcessSummaryReducer.groups(from: summaries)
-    }
-
-    func filteredProcessSummaries(from summaries: [MacFSWProcessSummary]) -> [MacFSWProcessSummary] {
-        ProcessSummaryReducer.filteredSummaries(
-            summaries,
-            query: processSearchText,
-            includeExited: includeExitedProcesses
-        )
-    }
-
-    func filterProcessSummaries(
-        _ summaries: [MacFSWProcessSummary],
-        query rawQuery: String,
-        includeExited: Bool
-    ) -> [MacFSWProcessSummary] {
-        ProcessSummaryReducer.filteredSummaries(summaries, query: rawQuery, includeExited: includeExited)
-    }
-
-    func operationSummaries(from summaries: [MacFSWOperationEventSummary]) -> [MacFSWOperationSummary] {
-        OperationSummaryReducer.operationSummaries(from: summaries)
-    }
-
     func applyOperationSummaryDelta(from rows: [MacFSWEventRowSummary]) {
         operationSummaries = OperationSummaryReducer.applying(rows: rows, to: operationSummaries)
-    }
-
-    func sortedOperationSummaries(from counts: [MacFSWOperationBucket: Int]) -> [MacFSWOperationSummary] {
-        OperationSummaryReducer.sortedOperationSummaries(from: counts)
     }
 
     func scheduleQueryRefresh() {

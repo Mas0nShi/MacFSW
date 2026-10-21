@@ -2,13 +2,6 @@ import Foundation
 import MacFSWCore
 
 enum ErrorPresentation {
-    static func userFacingMessage(_ error: Error) -> String {
-        if let localized = error as? LocalizedError, let description = localized.errorDescription {
-            return description
-        }
-        return String(describing: error)
-    }
-
     static func isCancellationError(_ error: Error) -> Bool {
         if error is CancellationError {
             return true

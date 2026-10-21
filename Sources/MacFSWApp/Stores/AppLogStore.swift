@@ -116,7 +116,7 @@ final class AppLogStore: ObservableObject {
                 try await writer.append(entry, to: fileURL)
             } catch {
                 await MainActor.run {
-                    self.lastWriteError = ErrorPresentation.userFacingMessage(error)
+                    self.lastWriteError = error.userFacingMessage
                 }
             }
         }
@@ -130,7 +130,7 @@ final class AppLogStore: ObservableObject {
             }
             NSWorkspace.shared.activateFileViewerSelecting([logFileURL])
         } catch {
-            lastWriteError = ErrorPresentation.userFacingMessage(error)
+            lastWriteError = error.userFacingMessage
         }
     }
 
@@ -149,7 +149,7 @@ final class AppLogStore: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
-                    self.lastWriteError = ErrorPresentation.userFacingMessage(error)
+                    self.lastWriteError = error.userFacingMessage
                 }
             }
         }

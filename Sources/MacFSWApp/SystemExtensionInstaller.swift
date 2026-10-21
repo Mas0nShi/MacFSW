@@ -225,7 +225,7 @@ extension SystemExtensionInstaller: OSSystemExtensionRequestDelegate {
             submitted = false
             currentRequest = nil
             currentRequestKind = nil
-            publish(.failed, userFacingMessage(error))
+            publish(.failed, error.userFacingMessage)
         }
     }
 
@@ -308,11 +308,4 @@ extension SystemExtensionInstaller: OSSystemExtensionRequestDelegate {
 
         return (shortVersion, buildVersion)
     }
-}
-
-private func userFacingMessage(_ error: Error) -> String {
-    if let localized = error as? LocalizedError, let description = localized.errorDescription {
-        return description
-    }
-    return String(describing: error)
 }
