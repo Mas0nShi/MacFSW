@@ -22,6 +22,7 @@ public actor MacFSWSQLiteEventStore {
     public nonisolated let url: URL
     private let dbQueue: DatabaseQueue
     private let ownedDirectoryURL: URL?
+    private let ownerLock: TemporaryDirectoryLock?
     private var nextSequence: UInt64
     private var didCleanupBackingStore = false
     private var resultSnapshots: [String: StoredResultSnapshot] = [:]
@@ -47,11 +48,21 @@ public actor MacFSWSQLiteEventStore {
     public init(
         url: URL,
         createIfNeeded: Bool = true,
-        defaultSession: MacFSWResearchSession? = nil,
-        ownedDirectoryURL: URL? = nil
+        defaultSession: MacFSWResearchSession? = nil
+    ) throws {
+        try self.init(url: url, createIfNeeded: createIfNeeded, defaultSession: defaultSession, ownedDirectoryURL: nil, ownerLock: nil)
+    }
+
+    private init(
+        url: URL,
+        createIfNeeded: Bool,
+        defaultSession: MacFSWResearchSession?,
+        ownedDirectoryURL: URL?,
+        ownerLock: TemporaryDirectoryLock?
     ) throws {
         self.url = url
         self.ownedDirectoryURL = ownedDirectoryURL
+        self.ownerLock = ownerLock
         if !createIfNeeded {
             try Self.validateSQLiteHeader(at: url)
         }
@@ -73,10 +84,19 @@ public actor MacFSWSQLiteEventStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(temporaryDirectoryPrefix)\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("session.sqlite")
-        return try MacFSWSQLiteEventStore(url: url, defaultSession: session, ownedDirectoryURL: directory)
+        let lock = try TemporaryDirectoryLock(holding: directory)
+        return try MacFSWSQLiteEventStore(
+            url: directory.appendingPathComponent("session.sqlite"),
+            createIfNeeded: true,
+            defaultSession: session,
+            ownedDirectoryURL: directory,
+            ownerLock: lock
+        )
     }
 
+    /// Deletes temporary stores left behind by processes that exited without
+    /// cleaning up. Stores still locked by a live process — another app
+    /// instance or a running `macfsw` CLI — are left alone.
     public static func cleanupStaleTemporaryStores() throws {
         let fileManager = FileManager.default
         let directoryURLs = try fileManager.contentsOfDirectory(
@@ -86,7 +106,7 @@ public actor MacFSWSQLiteEventStore {
         )
         for directoryURL in directoryURLs where isManagedTemporaryDirectoryName(directoryURL.lastPathComponent) {
             let values = try directoryURL.resourceValues(forKeys: [.isDirectoryKey])
-            guard values.isDirectory == true else {
+            guard values.isDirectory == true, !TemporaryDirectoryLock.isHeld(in: directoryURL) else {
                 continue
             }
             try fileManager.removeItem(at: directoryURL)
@@ -114,6 +134,7 @@ public actor MacFSWSQLiteEventStore {
         }
         didCleanupBackingStore = true
         try dbQueue.close()
+        ownerLock?.release()
         if FileManager.default.fileExists(atPath: ownedDirectoryURL.path) {
             try FileManager.default.removeItem(at: ownedDirectoryURL)
         }
