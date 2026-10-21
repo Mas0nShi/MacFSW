@@ -47,7 +47,6 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
 
     private let config: MacFSWCaptureConfig
     private let onBatch: @Sendable (MacFSWEventBatch) -> Void
-    private let onFinish: @Sendable (String?) -> Void
     private let lock = NSLock()
     private var pending: [MacFSWFileEvent] = []
     private var timer: DispatchSourceTimer?
@@ -59,14 +58,9 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
     private var client: OpaquePointer?
     #endif
 
-    public init(
-        config: MacFSWCaptureConfig,
-        onBatch: @escaping @Sendable (MacFSWEventBatch) -> Void,
-        onFinish: @escaping @Sendable (String?) -> Void
-    ) {
+    public init(config: MacFSWCaptureConfig, onBatch: @escaping @Sendable (MacFSWEventBatch) -> Void) {
         self.config = config
         self.onBatch = onBatch
-        self.onFinish = onFinish
     }
 
     deinit {

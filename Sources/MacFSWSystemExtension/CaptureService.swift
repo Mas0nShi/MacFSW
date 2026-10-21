@@ -1,18 +1,18 @@
 import Foundation
 import MacFSWCore
 
+/// One per XPC connection: the capture stream that connection opened.
+/// Callbacks into the capture and the subscriber always run outside
+/// `lock`, because stopping a capture flushes its last batch through
+/// `send`, which takes the lock again.
 public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private var activeCapture: EndpointSecurityCapture?
     private var activeSubscriber: MacFSWCaptureEventSubscriber?
     private let encoder = JSONEncoder.macfsw
 
-    public override init() {
-        super.init()
-    }
-
     deinit {
-        stopActiveCapture(errorMessage: nil)
+        stopActiveCapture()
     }
 
     public func openCaptureStream(
@@ -22,28 +22,22 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
     ) {
         do {
             let request = try JSONDecoder.macfsw.decode(MacFSWCaptureStreamRequest.self, from: payload)
-
-            lock.lock()
-            activeCapture?.stop()
-            activeSubscriber = subscriber
-            lock.unlock()
+            stopActiveCapture()
 
             let capture = EndpointSecurityCapture(config: request.config) { [weak self] batch in
                 self?.send(batch)
-            } onFinish: { [weak self] errorMessage in
-                self?.stopActiveCapture(errorMessage: errorMessage)
             }
+            // Batches can arrive as soon as the capture starts.
+            lock.withLock { activeSubscriber = subscriber }
+            do {
+                try capture.start()
+            } catch {
+                lock.withLock { activeSubscriber = nil }
+                throw error
+            }
+            lock.withLock { activeCapture = capture }
 
-            try capture.start()
-
-            lock.lock()
-            activeCapture = capture
-            lock.unlock()
-
-            let response = MacFSWCaptureStartResponse(
-                accepted: true,
-                health: capture.health()
-            )
+            let response = MacFSWCaptureStartResponse(accepted: true, health: capture.health())
             reply(try encoder.encode(response), nil)
         } catch {
             reply(nil, error.userFacingMessage)
@@ -51,13 +45,8 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
     }
 
     public func health(withReply reply: @escaping @Sendable (Data?, String?) -> Void) {
-        lock.lock()
-        let activeCapture = activeCapture
-        lock.unlock()
-
-        var health = activeCapture?.health() ?? EndpointSecurityCapture.authorizationHealth()
+        var health = lock.withLock { activeCapture }?.health() ?? EndpointSecurityCapture.authorizationHealth()
         health.extensionVersion = Bundle.main.macfswComponentVersion
-
         do {
             reply(try encoder.encode(health), nil)
         } catch {
@@ -66,15 +55,9 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
     }
 
     private func send(_ batch: MacFSWEventBatch) {
-        lock.lock()
-        let subscriber = activeSubscriber
-        lock.unlock()
-
-        guard let subscriber else {
-            stopActiveCapture(errorMessage: "Capture subscriber disconnected.")
+        guard let subscriber = lock.withLock({ activeSubscriber }) else {
             return
         }
-
         do {
             subscriber.eventBatch(try encoder.encode(batch))
         } catch {
@@ -82,15 +65,10 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
         }
     }
 
-    private func stopActiveCapture(errorMessage: String?) {
-        lock.lock()
-        let capture = activeCapture
-        let subscriber = activeSubscriber
-        activeCapture = nil
-        activeSubscriber = nil
-        lock.unlock()
-
-        capture?.stop()
-        subscriber?.captureFinished(errorMessage)
+    /// Stops the capture first so its final batch still reaches the
+    /// subscriber, then tells the subscriber the stream ended.
+    private func stopActiveCapture(errorMessage: String? = nil) {
+        lock.withLock { activeCapture.take() }?.stop()
+        lock.withLock { activeSubscriber.take() }?.captureFinished(errorMessage)
     }
 }
