@@ -92,6 +92,7 @@ final class WorkspaceTests: XCTestCase {
         let workspace = Workspace(client: StubCaptureClient(healthError: MacFSWClientError.xpcUnavailable("no service")), appVersion: "test")
         let status = await workspace.status()
         XCTAssertFalse(status.extension.reachable)
+        XCTAssertTrue(status.extension.message.contains("Open the MacFSW app"))
         XCTAssertNil(status.session)
     }
 
