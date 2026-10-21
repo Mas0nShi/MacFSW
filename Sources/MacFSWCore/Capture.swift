@@ -197,6 +197,11 @@ public final class MacFSWCaptureHandle: @unchecked Sendable {
     )
 
     func health(withReply reply: @escaping @Sendable (Data?, String?) -> Void)
+
+    /// Ends the stream gracefully: the extension stops capturing, sends any
+    /// events it still holds, then signals `captureFinished`. Messages on a
+    /// connection arrive in order, so that signal follows the last batch.
+    func stopCaptureStream(withReply reply: @escaping @Sendable () -> Void)
 }
 
 @objc public protocol MacFSWCaptureEventSubscriber {

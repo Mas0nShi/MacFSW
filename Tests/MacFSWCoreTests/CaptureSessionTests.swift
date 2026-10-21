@@ -54,6 +54,35 @@ final class CaptureSessionTests: XCTestCase {
         try await session.close()
     }
 
+    func testGracefulStopKeepsEventsSentAfterTheStopRequest() async throws {
+        let client = FakeCaptureClient()
+        client.tailOnStop = (100..<104).map { Self.events(batch: $0, count: 25) }
+        let session = try MacFSWCaptureSession.temporary(for: MacFSWResearchSession(), client: client)
+        let updates = await session.updates()
+        try await session.start(config: MacFSWCaptureConfig())
+        client.deliver(Self.events(batch: 0, count: 10))
+
+        let stopping = Task { await session.stop() }
+        var sawStopping = false
+        for await update in updates {
+            if case .stateChanged(.stopping, _) = update {
+                sawStopping = true
+                try await session.start(config: MacFSWCaptureConfig())
+                let state = await session.state
+                XCTAssertEqual(state, .stopping, "starting again must wait for the stop to finish")
+            }
+            if case .stateChanged(.stopped, _) = update {
+                break
+            }
+        }
+        await stopping.value
+
+        XCTAssertTrue(sawStopping)
+        let stored = try await session.store.count(matching: MacFSWEventQuery())
+        XCTAssertEqual(stored, 110)
+        try await session.close()
+    }
+
     func testStopWhileConnectingClosesTheStreamOnceItOpens() async throws {
         let client = FakeCaptureClient(opensImmediately: false)
         let session = try MacFSWCaptureSession.temporary(for: MacFSWResearchSession(), client: client)
@@ -178,6 +207,9 @@ private final class FakeCaptureClient: MacFSWCaptureClient, @unchecked Sendable 
     private let lock = NSLock()
     private let opensImmediately: Bool
     private let openError: (any Error)?
+    /// Like the extension's graceful stop: batches still sent after stop
+    /// is requested, before the finish signal.
+    var tailOnStop: [[MacFSWFileEvent]] = []
     private var onBatch: (@Sendable (MacFSWEventBatch) -> Void)?
     private var onFinish: (@Sendable ((any Error)?) -> Void)?
     private var pendingOpen: CheckedContinuation<MacFSWCaptureHandle, any Error>?
@@ -255,7 +287,15 @@ private final class FakeCaptureClient: MacFSWCaptureClient, @unchecked Sendable 
         MacFSWCaptureHandle { [weak self] in
             guard let self else { return }
             self.lock.withLock { self.stopped = true }
-            self.finish()
+            let tail = self.tailOnStop
+            guard !tail.isEmpty else {
+                self.finish()
+                return
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(200)) {
+                tail.forEach(self.deliver)
+                self.finish()
+            }
         }
     }
 }

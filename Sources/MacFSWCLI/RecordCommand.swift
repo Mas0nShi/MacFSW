@@ -68,6 +68,7 @@ struct RecordCommand: AsyncParsableCommand {
             try await Task.sleep(for: .milliseconds(250))
         }
         progress.finish()
+        Self.log("Stopping; writing the last captured events…")
         let stopped = try await workspace.stopCapture()
         if stopped.captureState == .failed {
             Self.log("Capture ended with an error; saving what was recorded.")

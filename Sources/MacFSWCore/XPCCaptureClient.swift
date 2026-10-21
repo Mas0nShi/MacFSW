@@ -45,6 +45,10 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
         }
     }
 
+    /// Seconds a graceful stop may take before the connection is cut
+    /// anyway; covers an extension that never confirms the stop.
+    static let gracefulStopTimeout: TimeInterval = 30
+
     public func openCaptureStream(
         config: MacFSWCaptureConfig,
         onBatch: @escaping @Sendable (MacFSWEventBatch) -> Void,
@@ -52,7 +56,14 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
     ) async throws -> MacFSWCaptureHandle {
         let connection = NSXPCConnection(machServiceName: serviceName, options: [])
         let connectionBox = XPCConnectionBox(connection)
-        let receiver = XPCEventReceiver(onBatch: onBatch, onFinish: onFinish)
+        // The stream ends once: by the extension's finish signal, an
+        // interruption, or invalidation — whichever comes first. A finish
+        // signal also closes the connection, since nothing follows it.
+        let finishOnce = FinishOnce { error in
+            onFinish(error)
+            connectionBox.invalidate()
+        }
+        let receiver = XPCEventReceiver(onBatch: onBatch, onFinish: finishOnce.finish)
         connection.remoteObjectInterface = MacFSWXPCInterfaces.captureServiceInterface()
         connection.exportedInterface = MacFSWXPCInterfaces.captureEventSubscriberInterface()
         connection.exportedObject = receiver
@@ -61,7 +72,7 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
             let state = XPCRequestState(connection: connection, continuation: continuation, keepsConnection: true)
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
                 let error = MacFSWClientError(connectionError: error)
-                onFinish(error)
+                finishOnce.finish(error)
                 state.finish(.failure(error))
             } as? MacFSWCaptureXPCProtocol
 
@@ -73,10 +84,10 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
             do {
                 let payload = try encoder.encode(MacFSWCaptureStreamRequest(config: config.transportSafe))
                 connection.interruptionHandler = {
-                    onFinish(MacFSWClientError.xpcUnavailable("Capture stream interrupted."))
+                    finishOnce.finish(MacFSWClientError.xpcUnavailable("Capture stream interrupted."))
                 }
                 connection.invalidationHandler = {
-                    onFinish(nil)
+                    finishOnce.finish(nil)
                 }
                 connection.resume()
                 proxy.openCaptureStream(payload, subscriber: receiver) { data, errorMessage in
@@ -88,7 +99,7 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
                     switch result {
                     case .success:
                         state.finish(.success(MacFSWCaptureHandle {
-                            connectionBox.invalidate()
+                            connectionBox.requestGracefulStop(timeout: Self.gracefulStopTimeout)
                         }))
                     case .failure(let error):
                         state.finish(.failure(error))
@@ -144,6 +155,27 @@ public enum MacFSWClientError: Error, LocalizedError, Sendable {
     }
 }
 
+/// Delivers the first finish of a capture stream and drops the rest.
+private final class FinishOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didFinish = false
+    private let handler: @Sendable ((any Error)?) -> Void
+
+    init(_ handler: @escaping @Sendable ((any Error)?) -> Void) {
+        self.handler = handler
+    }
+
+    func finish(_ error: (any Error)?) {
+        let isFirst = lock.withLock { () -> Bool in
+            defer { didFinish = true }
+            return !didFinish
+        }
+        if isFirst {
+            handler(error)
+        }
+    }
+}
+
 private final class XPCConnectionBox: @unchecked Sendable {
     private let connection: NSXPCConnection
 
@@ -153,6 +185,22 @@ private final class XPCConnectionBox: @unchecked Sendable {
 
     func invalidate() {
         connection.invalidate()
+    }
+
+    /// Asks the extension to end the stream; the connection closes when its
+    /// finish signal arrives, or after `timeout` if it never does.
+    func requestGracefulStop(timeout: TimeInterval) {
+        let proxy = connection.remoteObjectProxyWithErrorHandler { [weak self] _ in
+            self?.invalidate()
+        } as? MacFSWCaptureXPCProtocol
+        guard let proxy else {
+            invalidate()
+            return
+        }
+        proxy.stopCaptureStream {}
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [self] in
+            invalidate()
+        }
     }
 }
 

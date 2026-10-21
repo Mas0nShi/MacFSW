@@ -143,7 +143,7 @@ final class MacFSWAppCoordinator {
         case .connecting:
             "Opening Endpoint Security stream."
         case .stopping:
-            "Stopping capture stream."
+            "Writing the last captured events."
         case .failed, .degraded:
             session.captureHealth.message
         case .stopped, .idle:

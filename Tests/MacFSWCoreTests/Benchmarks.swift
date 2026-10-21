@@ -14,6 +14,7 @@ final class IngestBenchmark: XCTestCase {
         let batch = 256, total = 100_000
         var report: [String] = []
         var segmentStart = ContinuousClock.now
+        let runStart = ContinuousClock.now
         var appended = 0
         while appended < total {
             let events = (0..<batch).map { i in
@@ -28,7 +29,9 @@ final class IngestBenchmark: XCTestCase {
                 segmentStart = ContinuousClock.now
             }
         }
-        print("BENCH " + report.joined(separator: " | "))
+        let runDuration = ContinuousClock.now - runStart
+        let totalSeconds = Double(runDuration.components.seconds) + Double(runDuration.components.attoseconds) / 1e18
+        print("BENCH total \(Int(Double(appended) / totalSeconds)) ev/s | " + report.joined(separator: " | "))
         try await store.cleanupBackingStore()
     }
 }

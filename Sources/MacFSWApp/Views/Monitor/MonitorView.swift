@@ -135,7 +135,7 @@ struct MonitorCommandBar: View {
             } label: {
                 Label(recordButtonTitle, systemImage: recordButtonSymbol)
             }
-            .disabled(model.session.isReadOnly)
+            .disabled(model.session.isReadOnly || model.session.captureState == .stopping)
             .help(model.session.isReadOnly ? Self.readOnlyHelp : "")
 
             if model.shouldShowJumpToLive {

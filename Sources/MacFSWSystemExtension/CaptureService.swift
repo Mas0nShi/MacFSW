@@ -54,6 +54,11 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
         }
     }
 
+    public func stopCaptureStream(withReply reply: @escaping @Sendable () -> Void) {
+        stopActiveCapture()
+        reply()
+    }
+
     private func send(_ batch: MacFSWEventBatch) {
         guard let subscriber = lock.withLock({ activeSubscriber }) else {
             return

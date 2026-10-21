@@ -82,7 +82,7 @@ public actor MacFSWCaptureSession {
         guard !store.isReadOnly else {
             throw MacFSWCaptureSessionError.readOnly
         }
-        guard state != .connecting, handle == nil else {
+        guard state != .connecting, state != .stopping, handle == nil else {
             return
         }
         setState(.connecting)
@@ -123,8 +123,10 @@ public actor MacFSWCaptureSession {
         }
     }
 
-    /// Stops recording and returns once every batch already received is in
-    /// the store, so a save right after stopping keeps the whole capture.
+    /// Stops recording and returns once the stream has delivered everything
+    /// it captured and all of it is in the store, so a save right after
+    /// stopping keeps the whole capture. Under load this takes a moment;
+    /// the state reads `.stopping` meanwhile.
     public func stop() async {
         switch state {
         case .connecting:
@@ -132,24 +134,26 @@ public actor MacFSWCaptureSession {
         case .recording:
             deadlineTask?.cancel()
             deadlineTask = nil
+            setState(.stopping)
             handle?.stop()
             handle = nil
-            setState(.stopped)
             await drainIngest()
+            setState(.stopped)
         default:
             break
         }
     }
 
     /// Ingest ends at the stream's finish signal, which follows the last
-    /// batch. Bounded in case a client never signals the finish.
+    /// batch. Bounded beyond the transport's own graceful-stop timeout in
+    /// case a client never signals the finish at all.
     private func drainIngest() async {
         guard let ingest = ingestTask else {
             return
         }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await ingest.value }
-            group.addTask { try? await Task.sleep(for: .seconds(2)) }
+            group.addTask { try? await Task.sleep(for: .seconds(MacFSWXPCCaptureClient.gracefulStopTimeout + 10)) }
             await group.next()
             group.cancelAll()
         }
@@ -224,6 +228,7 @@ public actor MacFSWCaptureSession {
         handle = nil
         ingestTask = nil
         guard state == .recording else {
+            // A finish during `.stopping` is the expected end of a stop.
             return
         }
         if let error, !(error is CancellationError) {
