@@ -36,10 +36,11 @@ Use Help > MacFSW User Manual to open the current manual on GitHub.
 - 12. Analysis Beta
 - 13. System Extension Settings
 - 14. Logs
-- 15. Privacy Model
-- 16. Troubleshooting
-- 17. Keyboard Shortcuts
-- 18. Glossary
+- 15. Command Line and AI Agents
+- 16. Privacy Model
+- 17. Troubleshooting
+- 18. Keyboard Shortcuts
+- 19. Glossary
 
 ## 1. What MacFSW Is
 
@@ -581,7 +582,46 @@ The Logs settings pane controls whether diagnostic logs are written, the minimum
 
 Capture, System Extension, SQLite, and analysis errors are written with full error details so status bar truncation does not hide the actionable failure.
 
-## 15. Privacy Model
+## 15. Command Line and AI Agents
+
+MacFSW ships a command-line tool, `macfsw`, inside the app bundle:
+
+```text
+/Applications/MacFSW.app/Contents/MacOS/macfsw
+```
+
+It runs on its own: the MacFSW app does not need to be open. Recording still needs the Endpoint Extension enabled and approved once from the app (see section 3). Settings > CLI & Agents shows the path and copies the commands below.
+
+### 15.1 Command Line
+
+```bash
+macfsw status                                   # can the extension record?
+macfsw record --duration 60 --out install.macfsw-session
+macfsw summary install.macfsw-session
+macfsw processes install.macfsw-session 'mutation:true'
+macfsw query install.macfsw-session 'path:/Library/LaunchAgents' --newest
+macfsw event install.macfsw-session <event-id>
+```
+
+`record` stops after `--duration` seconds or on Ctrl-C and then saves. It refuses to replace an existing file unless you pass `--force`. Queries use the same language as the Monitor query bar (section 11). Add `--json` to any command for machine-readable output.
+
+Sessions recorded by `macfsw` open in the app, and sessions saved by the app can be queried with `macfsw`.
+
+### 15.2 AI Agents (MCP)
+
+`macfsw mcp` serves MacFSW to AI agents over the Model Context Protocol. Register it with Claude Code:
+
+```bash
+claude mcp add macfsw -- /Applications/MacFSW.app/Contents/MacOS/macfsw mcp
+```
+
+Other MCP clients can launch the same command as a stdio server.
+
+An agent works with one session at a time. It can start and stop recording, open and save `.macfsw-session` files, and query events, processes, and summaries. It never writes into a file it opened: starting a capture after opening a file starts a new session. To hand an agent a recording made in the app, save it and ask the agent to open the file.
+
+Captured file and process names are produced by the programs being observed, and a malicious program can name a file like an instruction. MacFSW tells agents to treat event fields as data, but review what an agent does when it analyzes untrusted software.
+
+## 16. Privacy Model
 
 MacFSW captures private local information:
 
@@ -599,9 +639,11 @@ Session persistence is explicit. Save a session only when you want a durable art
 
 Analysis Beta may send selected event summaries to your configured LLM provider. The app does not silently upload captures outside that user-triggered analysis flow.
 
-## 16. Troubleshooting
+An AI agent you connect through `macfsw mcp` reads whatever it queries and passes it to its own model provider. Only connect agents you would trust with the captured data.
 
-### 15.1 Record Shows Enable Extension
+## 17. Troubleshooting
+
+### 17.1 Record Shows Enable Extension
 
 The System Extension is missing, disabled, outdated, or not approved.
 
@@ -617,7 +659,7 @@ Then approve it in:
 System Settings > General > Login Items & Extensions
 ```
 
-### 15.2 Record Shows Open Full Disk Access
+### 17.2 Record Shows Open Full Disk Access
 
 The System Extension is installed, but macOS denied Endpoint Security client creation.
 
@@ -635,13 +677,13 @@ MacFSW Endpoint Extension
 
 Then return to MacFSW and click Check Again.
 
-### 15.3 Endpoint Security Error Includes rawValue 4
+### 17.3 Endpoint Security Error Includes rawValue 4
 
 `ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED` with `rawValue: 4` means the System Extension does not have the required Endpoint Security / Full Disk Access authorization.
 
 Grant permission to `MacFSW Endpoint Extension`, not only to `MacFSW.app`.
 
-### 15.4 Extension Is Activated but Capture Still Fails
+### 17.4 Extension Is Activated but Capture Still Fails
 
 Try these steps:
 
@@ -653,7 +695,7 @@ Try these steps:
 6. Confirm Full Disk Access for `MacFSW Endpoint Extension`.
 7. Reboot if old extension versions are waiting to uninstall.
 
-### 15.5 No Events Appear
+### 17.5 No Events Appear
 
 Check:
 
@@ -664,7 +706,7 @@ Check:
 - excluded paths or excluded process names are not hiding the events
 - the capture profile includes the event type you expect
 
-### 15.6 Too Many Events Appear
+### 17.6 Too Many Events Appear
 
 Use:
 
@@ -677,7 +719,7 @@ Use:
 
 Avoid verbose read capture unless you specifically need open and close events.
 
-### 15.7 Analysis Fails
+### 17.7 Analysis Fails
 
 Check:
 
@@ -690,7 +732,7 @@ Check:
 
 Use Test Connection in Settings > Analysis.
 
-## 17. Keyboard Shortcuts
+## 18. Keyboard Shortcuts
 
 Common shortcuts:
 
@@ -703,7 +745,7 @@ Command-Shift-/      Open MacFSW User Manual on GitHub
 
 macOS may display `Command-Shift-/` as `Command-?`.
 
-## 18. Glossary
+## 19. Glossary
 
 Endpoint Security:
 Apple's macOS framework for observing system events through an entitled System Extension.

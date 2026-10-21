@@ -33,6 +33,7 @@ MacFSW is not an antivirus, EDR, prevention product, backup tool, file recovery 
 - Structured query language with boolean logic, wildcards, numeric comparisons, raw ES event filters, and signing identity filters.
 - Native `.macfsw-session` files for explicitly saved research artifacts.
 - Process-scoped Analysis Beta that can stream Markdown reports from a user-configured LLM provider.
+- `macfsw` command-line tool that records and queries sessions without the app, and serves them to AI agents over MCP.
 - Privacy-first session model: captured data is temporary by default and persistence happens only when the user saves.
 
 ## Quick Start
@@ -79,6 +80,25 @@ rawtype:987654
 ```
 
 Supported query features include adjacent-term `AND`, `OR`, `NOT`, parentheses, `:`, `=`, `!=`, `>`, `>=`, `<`, `<=`, comma-separated values, and `*` / `?` wildcards.
+
+## Command Line and AI Agents
+
+The app bundle includes `macfsw`, which works without the app running:
+
+```bash
+MACFSW=/Applications/MacFSW.app/Contents/MacOS/macfsw
+$MACFSW record --duration 60 --out install.macfsw-session
+$MACFSW summary install.macfsw-session
+$MACFSW query install.macfsw-session 'path:/Library/LaunchAgents mutation:true' --json
+```
+
+Register it as an MCP server so an agent can record, query, and save sessions:
+
+```bash
+claude mcp add macfsw -- /Applications/MacFSW.app/Contents/MacOS/macfsw mcp
+```
+
+See [Command Line and AI Agents](docs/user-manual.md#15-command-line-and-ai-agents) in the user manual.
 
 ## Requirements
 
@@ -153,6 +173,11 @@ MacFSW.app
   - Save / open session workflows
   - Analysis Beta
 
+macfsw (Contents/MacOS, runs independently of the app)
+  - record / query / summary subcommands
+  - stdio MCP server for AI agents
+  - Same session engine and query engine as the app
+
 MacFSW Endpoint Extension
   - Endpoint Security client lifecycle
   - Low-level event subscription
@@ -170,9 +195,11 @@ Capture is bound to the live XPC stream. When the app stops recording, crashes, 
 Sources/MacFSWCore              Product models, query logic, archives, event stores, XPC contracts
 Sources/MacFSWApp               SwiftUI/AppKit app, Coordinator, stores, views, settings
 Sources/MacFSWAnalysis          Process-scoped analysis payloads and LLM client integration
+Sources/MacFSWCommands          Session operations shared by the CLI and MCP tools
+Sources/MacFSWCLI               The macfsw command-line tool and MCP server
 Sources/MacFSWSystemExtension   Endpoint Security capture service and XPC listener
 Sources/MacFSWEndpointExtension System Extension executable entry point
-Tests                           Unit tests for core, app, analysis, and XPC authorization behavior
+Tests                           Unit tests for core, app, analysis, commands, CLI/MCP, and XPC client policy
 Configuration                   Info.plist, entitlements, and signing configuration
 Scripts                         Local check and app packaging scripts
 docs                            User, engineering, product, and packaging documentation
@@ -185,7 +212,8 @@ docs                            User, engineering, product, and packaging docume
 - Active session storage is app-owned and temporary unless the user saves a `.macfsw-session` file.
 - Analysis Beta runs only when the user starts it and may send scoped event summaries to the configured provider.
 - API keys for analysis providers are stored in Keychain.
-- The XPC listener validates client identity before accepting capture connections.
+- The XPC listener admits only the signed MacFSW app and the bundled `macfsw` tool.
+- AI agents get access only when you register `macfsw mcp` with them; what they query goes to their model provider.
 
 ## Documentation
 
