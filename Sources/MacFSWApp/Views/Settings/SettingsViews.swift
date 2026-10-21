@@ -8,6 +8,7 @@ enum MacFSWSettingsSection: String, CaseIterable, Identifiable {
     case analysis
     case capture
     case systemExtension
+    case agents
     case logs
 
     var id: String { rawValue }
@@ -22,6 +23,8 @@ enum MacFSWSettingsSection: String, CaseIterable, Identifiable {
             "Capture"
         case .systemExtension:
             "System Extension"
+        case .agents:
+            "CLI & Agents"
         case .logs:
             "Logs"
         }
@@ -37,6 +40,8 @@ enum MacFSWSettingsSection: String, CaseIterable, Identifiable {
             "record.circle"
         case .systemExtension:
             "puzzlepiece.extension"
+        case .agents:
+            "terminal"
         case .logs:
             "doc.text.magnifyingglass"
         }
@@ -46,7 +51,7 @@ enum MacFSWSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .analysis:
             true
-        case .general, .capture, .systemExtension, .logs:
+        case .general, .capture, .systemExtension, .agents, .logs:
             false
         }
     }
@@ -83,6 +88,8 @@ struct SettingsView: View {
                     CaptureSettingsPane()
                 case .systemExtension:
                     SystemExtensionSettingsPane()
+                case .agents:
+                    AgentSettingsPane()
                 case .logs:
                     LogsSettingsPane()
                 }
