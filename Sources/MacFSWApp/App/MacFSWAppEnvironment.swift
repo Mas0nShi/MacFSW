@@ -10,7 +10,6 @@ protocol SystemExtensionInstalling: AnyObject {
 
     func activate()
     func checkInstalledVersion()
-    func resetSubmission()
     func openLoginItemsSettings()
     func openFullDiskAccessSettings()
 }

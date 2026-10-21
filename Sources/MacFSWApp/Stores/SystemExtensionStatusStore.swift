@@ -30,7 +30,8 @@ final class SystemExtensionStatusStore {
     @ObservationIgnored
     var onErrorMessage: ((String) -> Void)?
     @ObservationIgnored
-    var onReady: (() -> Void)?
+    /// macOS activated the extension; its process may still be starting.
+    var onActivated: (() -> Void)?
 
     private let installer: any SystemExtensionInstalling
 
@@ -46,12 +47,12 @@ final class SystemExtensionStatusStore {
             case .failed:
                 pendingUpdate = nil
                 onErrorMessage?(message)
-            case .ready:
+            case .starting:
                 if let pendingUpdate {
                     completedUpdate = pendingUpdate
                     self.pendingUpdate = nil
                 }
-                onReady?()
+                onActivated?()
             default:
                 break
             }
@@ -73,10 +74,6 @@ final class SystemExtensionStatusStore {
         installer.openFullDiskAccessSettings()
     }
 
-    func checkAgain() {
-        installer.resetSubmission()
-    }
-
     func applyHealth(_ health: MacFSWCaptureHealth) {
         if health.fullDiskAccessHint {
             installState = .failed
@@ -85,6 +82,11 @@ final class SystemExtensionStatusStore {
         }
 
         runningVersion = health.extensionVersion
+        // While macOS is still activating or waiting for approval, the old
+        // extension may answer; that must not end the activation display.
+        guard installState != .activating, installState != .needsApproval else {
+            return
+        }
         installState = .ready
         installMessage = health.endpointSecurityAuthorized
             ? "MacFSW Endpoint Extension is reachable and has Endpoint Security permission."
@@ -101,7 +103,6 @@ final class SystemExtensionStatusStore {
     }
 
     func applyXPCFailure(message: String) {
-        installer.resetSubmission()
         installState = .notReady
         installMessage = "The installed Endpoint Extension is not accepting capture streams. It may be out of date; enable the System Extension again to install the bundled version."
     }

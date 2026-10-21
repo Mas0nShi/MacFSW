@@ -263,9 +263,13 @@ final class MacFSWAppTests: XCTestCase {
 
         installer.onUpdateStarted?("0.1.8 (13)", "0.1.8 (14)")
         installer.onStateChange?(.activating, "Updating")
-        installer.onStateChange?(.ready, "Done")
+        store.applyHealth(MacFSWCaptureHealth(endpointSecurityAuthorized: true, extensionVersion: MacFSWComponentVersion(shortVersion: "0.1.8", build: "13")))
+        XCTAssertEqual(store.installState, .activating, "the old extension answering must not end the activation")
+        installer.onStateChange?(.starting, "Activated")
+        XCTAssertEqual(store.installState, .starting)
         store.applyHealth(MacFSWCaptureHealth(endpointSecurityAuthorized: true, extensionVersion: MacFSWComponentVersion(shortVersion: "0.1.8", build: "14")))
 
+        XCTAssertEqual(store.installState, .ready)
         XCTAssertEqual(store.completedUpdate?.from, "0.1.8 (13)")
         XCTAssertEqual(store.completedUpdate?.to, "0.1.8 (14)")
         XCTAssertEqual(store.runningVersion?.build, "14")
@@ -274,7 +278,7 @@ final class MacFSWAppTests: XCTestCase {
         let failed = SystemExtensionStatusStore(installer: failingInstaller)
         failingInstaller.onUpdateStarted?("0.1.8 (13)", "0.1.8 (14)")
         failingInstaller.onStateChange?(.failed, "Denied")
-        failingInstaller.onStateChange?(.ready, "Ready")
+        failingInstaller.onStateChange?(.starting, "Activated")
         XCTAssertNil(failed.completedUpdate)
     }
 
@@ -309,8 +313,6 @@ private final class TestSystemExtensionInstaller: SystemExtensionInstalling {
     func checkInstalledVersion() {
         checkInstalledVersionCallCount += 1
     }
-
-    func resetSubmission() {}
 
     func openLoginItemsSettings() {}
 

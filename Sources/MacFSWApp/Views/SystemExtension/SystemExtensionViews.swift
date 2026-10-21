@@ -73,7 +73,7 @@ struct SystemExtensionStatusView: View {
                 Text(model.extensionStatus.installState.title)
                     .font(.callout.weight(.medium))
                 Spacer()
-                if model.extensionStatus.installState == .activating || model.extensionStatus.installState == .unknown {
+                if [.activating, .starting, .unknown].contains(model.extensionStatus.installState) {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -119,6 +119,8 @@ struct SystemExtensionStatusView: View {
                     }
                     .buttonStyle(.borderless)
                 }
+            case .starting:
+                EmptyView()
             case .activating:
                 Button {
                     model.extensionStatus.openLoginItemsSettings()
@@ -139,7 +141,7 @@ struct SystemExtensionStatusView: View {
             .red
         case .needsApproval:
             .orange
-        case .activating:
+        case .activating, .starting:
             .blue
         case .unknown, .notReady:
             .secondary

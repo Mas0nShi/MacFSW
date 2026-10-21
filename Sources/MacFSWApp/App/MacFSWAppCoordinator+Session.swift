@@ -205,13 +205,28 @@ extension MacFSWAppCoordinator {
         }
     }
 
+    /// macOS reports an activation done before the new extension process
+    /// answers; until it does, the old process may still respond or nothing
+    /// may. Waits for the bundled version instead of reporting either as
+    /// the outcome.
+    func waitForActivatedExtension() async {
+        let bundled = extensionStatus.bundledVersion
+        for _ in 0..<10 {
+            if let health = try? await session.refreshHealth(), bundled == nil || health.extensionVersion == bundled {
+                extensionStatus.applyHealth(health)
+                return
+            }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        await refreshHealth()
+    }
+
     func activateSystemExtension() {
         errorMessage = nil
         extensionStatus.activate()
     }
 
     func checkSystemExtensionAgain() {
-        extensionStatus.checkAgain()
         Task { await refreshHealth() }
     }
 }

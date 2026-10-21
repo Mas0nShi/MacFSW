@@ -85,8 +85,8 @@ final class MacFSWAppCoordinator {
             self?.errorMessage = message
             self?.log.record(.error, message, category: "SystemExtension")
         }
-        extensionStatus.onReady = { [weak self] in
-            Task { await self?.refreshHealth() }
+        extensionStatus.onActivated = { [weak self] in
+            Task { await self?.waitForActivatedExtension() }
         }
         session.onEvents = { [weak self] events in
             self?.ingest(events)
