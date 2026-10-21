@@ -13,10 +13,13 @@ let package = Package(
         .library(name: "MacFSWSystemExtension", targets: ["MacFSWSystemExtension"]),
         .executable(name: "MacFSWApp", targets: ["MacFSWApp"]),
         .executable(name: "MacFSWEndpointExtension", targets: ["MacFSWEndpointExtension"]),
+        .executable(name: "macfsw", targets: ["MacFSWCLI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
         .package(url: "https://github.com/Lakr233/MarkdownView", from: "3.6.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.0"),
     ],
     targets: [
         .target(
@@ -65,6 +68,18 @@ let package = Package(
                 .linkedLibrary("bsm")
             ]
         ),
+        .target(
+            name: "MacFSWCommands",
+            dependencies: ["MacFSWCore"]
+        ),
+        .executableTarget(
+            name: "MacFSWCLI",
+            dependencies: [
+                "MacFSWCommands",
+                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ]
+        ),
         .testTarget(
             name: "MacFSWCoreTests",
             dependencies: ["MacFSWCore"]
@@ -76,6 +91,17 @@ let package = Package(
         .testTarget(
             name: "MacFSWAppTests",
             dependencies: ["MacFSWApp"]
+        ),
+        .testTarget(
+            name: "MacFSWCommandsTests",
+            dependencies: ["MacFSWCommands"]
+        ),
+        .testTarget(
+            name: "MacFSWCLITests",
+            dependencies: [
+                "MacFSWCLI",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
         ),
         .testTarget(
             name: "MacFSWSystemExtensionTests",
