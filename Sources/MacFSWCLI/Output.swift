@@ -67,14 +67,29 @@ extension EventSummary: TextRenderable {
 
 extension Status: TextRenderable {
     var text: String {
-        var lines = [
-            "Endpoint Extension: \(self.extension.reachable ? (self.extension.authorized ? "ready" : "reachable, not authorized") : "unavailable")",
-            "  \(self.extension.message)",
-        ]
+        var lines = [self.extension.text]
         if let session {
             lines.append(session.text)
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+extension ExtensionStatus: TextRenderable {
+    var headline: String {
+        let version = runningVersion.map { " \($0)" } ?? ""
+        switch state {
+        case .ready: return "Endpoint Extension\(version): ready"
+        case .outdated: return "Endpoint Extension\(version): outdated (this MacFSW has \(bundledVersion ?? "a newer one"))"
+        case .notInstalled: return "Endpoint Extension: not installed"
+        case .needsFullDiskAccess: return "Endpoint Extension\(version): needs Full Disk Access"
+        case .notAuthorized: return "Endpoint Extension\(version): not authorized"
+        case .unreachable: return "Endpoint Extension: unavailable"
+        }
+    }
+
+    var text: String {
+        "\(headline)\n  \(message)"
     }
 }
 

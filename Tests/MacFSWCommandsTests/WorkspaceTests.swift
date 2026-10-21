@@ -91,8 +91,8 @@ final class WorkspaceTests: XCTestCase {
     func testStatusReportsAnUnreachableExtension() async {
         let workspace = Workspace(client: StubCaptureClient(healthError: MacFSWClientError.xpcUnavailable("no service")), appVersion: "test")
         let status = await workspace.status()
-        XCTAssertFalse(status.extension.reachable)
-        XCTAssertTrue(status.extension.message.contains("Open the MacFSW app"))
+        XCTAssertEqual(status.extension.state, .unreachable)
+        XCTAssertTrue(status.extension.message.contains("macfsw setup"))
         XCTAssertNil(status.session)
     }
 
@@ -121,15 +121,60 @@ final class WorkspaceTests: XCTestCase {
     }
 }
 
+final class ExtensionInspectorTests: XCTestCase {
+    private let v14 = MacFSWComponentVersion(shortVersion: "0.1.8", build: "14")
+    private let v15 = MacFSWComponentVersion(shortVersion: "0.1.8", build: "15")
+
+    func testReadyWhenTheRunningExtensionMatchesTheBundledOne() async {
+        let status = await ExtensionInspector(bundledVersion: v15).inspect(StubCaptureClient(version: v15))
+        XCTAssertEqual(status.state, .ready)
+        XCTAssertEqual(status.runningVersion, "0.1.8 (15)")
+    }
+
+    func testOutdatedWhenTheRunningExtensionIsOlderOrTooOldToSay() async {
+        let older = await ExtensionInspector(bundledVersion: v15).inspect(StubCaptureClient(version: v14))
+        XCTAssertEqual(older.state, .outdated)
+        let silent = await ExtensionInspector(bundledVersion: v15).inspect(StubCaptureClient(version: nil))
+        XCTAssertEqual(silent.state, .outdated)
+        XCTAssertTrue(silent.message.contains("macfsw setup"))
+    }
+
+    func testRefusedConnectionIsExplainedByTheActivatedVersion() async {
+        let refused = StubCaptureClient(healthError: NSError(domain: NSCocoaErrorDomain, code: NSXPCConnectionInterrupted))
+        let v14 = self.v14
+        let outdated = await ExtensionInspector(bundledVersion: v15, activatedVersion: { v14 }).inspect(refused)
+        XCTAssertEqual(outdated.state, .outdated)
+        XCTAssertEqual(outdated.runningVersion, "0.1.8 (14)")
+
+        let missing = await ExtensionInspector(bundledVersion: v15, activatedVersion: { nil }).inspect(refused)
+        XCTAssertEqual(missing.state, .notInstalled)
+    }
+
+    func testFullDiskAccessIsCalledOut() async {
+        var client = StubCaptureClient(version: v15)
+        client.fullDiskAccess = true
+        let status = await ExtensionInspector(bundledVersion: v15).inspect(client)
+        XCTAssertEqual(status.state, .needsFullDiskAccess)
+    }
+}
+
 /// Accepts every capture request and never delivers events.
 private struct StubCaptureClient: MacFSWCaptureClient {
     var healthError: (any Error)?
+    var version: MacFSWComponentVersion?
+    var fullDiskAccess = false
 
     func health() async throws -> MacFSWCaptureHealth {
         if let healthError {
             throw healthError
         }
-        return MacFSWCaptureHealth(state: .idle, endpointSecurityAuthorized: true, message: "ok")
+        return MacFSWCaptureHealth(
+            state: .idle,
+            endpointSecurityAuthorized: !fullDiskAccess,
+            fullDiskAccessHint: fullDiskAccess,
+            message: "ok",
+            extensionVersion: version
+        )
     }
 
     func openCaptureStream(

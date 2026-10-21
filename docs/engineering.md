@@ -129,7 +129,7 @@ Version metadata has a single source of truth in `Configuration/Signing.xcconfig
 
 ```text
 MARKETING_VERSION = 0.1.8
-CURRENT_PROJECT_VERSION = 14
+CURRENT_PROJECT_VERSION = 15
 ```
 
 Those are the standard Xcode build setting names for `CFBundleShortVersionString` and `CFBundleVersion`. App code must read the installed bundle metadata through `Bundle.main` when it needs the product version, for example when creating session metadata. Core libraries must not hardcode the App version.
@@ -190,7 +190,9 @@ identifier "com.mas0n.MacFSW.cli"                                               
 
 `Scripts/package-dev-app.sh` signs `Contents/MacOS/macfsw` with the CLI identifier and verifies it. Each accepted connection gets its own capture service and Endpoint Security client, so the app and the CLI can record at the same time.
 
-Changing the policy changes the extension binary. macOS replaces an activated System Extension only when its `CFBundleVersion` changes, so bump `CURRENT_PROJECT_VERSION` in `Configuration/Signing.xcconfig`, repackage, and enable the System Extension again from the app. With an unchanged build number the previously activated binary keeps running.
+Health checks carry the running extension's `CFBundleVersion`, so the app and `macfsw status` can tell an outdated extension from a healthy one. When an older extension refuses the CLI's connection outright, the CLI reads the activated version from `systemextensionsctl list` instead. `macfsw setup` launches the app with `--setup-extension` (or posts `com.mas0n.MacFSW.setupExtension` to a running app) because only the app bundle may submit activation requests, then polls until the extension is ready.
+
+Any change to the extension binary — like this policy — must ship with a new build number. macOS replaces an activated System Extension only when its `CFBundleVersion` changes, so bump `CURRENT_PROJECT_VERSION` in `Configuration/Signing.xcconfig`, repackage, and enable the System Extension again from the app. With an unchanged build number the previously activated binary keeps running.
 
 ## Agent Interface (MCP)
 

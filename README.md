@@ -87,6 +87,7 @@ The app bundle includes `macfsw`, which works without the app running:
 
 ```bash
 MACFSW=/Applications/MacFSW.app/Contents/MacOS/macfsw
+$MACFSW setup        # once, and after updates: installs or updates the Endpoint Extension via the app
 $MACFSW record --duration 60 --out install.macfsw-session
 $MACFSW summary install.macfsw-session
 $MACFSW query install.macfsw-session 'path:/Library/LaunchAgents mutation:true' --json

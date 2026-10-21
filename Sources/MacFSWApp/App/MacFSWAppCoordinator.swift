@@ -1,3 +1,4 @@
+import AppKit
 import MacFSWAnalysis
 import MacFSWCore
 import Observation
@@ -38,7 +39,31 @@ final class MacFSWAppCoordinator {
         monitor = MonitorStore(eventStore: session.eventStore, processSidebar: processSidebar, queryHistory: queryHistory)
         selectedPage = preferences.defaultStartupPage
         wireStores()
+        listenForExtensionSetupRequests()
         log.record(.info, "App coordinator initialized.", category: "App")
+    }
+
+    /// `macfsw setup` launches the app with an argument, or notifies it
+    /// when it is already running.
+    private func listenForExtensionSetupRequests() {
+        DistributedNotificationCenter.default().addObserver(
+            forName: MacFSWExtensionSetupSignal.notification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.setUpExtensionForCLI()
+            }
+        }
+        if CommandLine.arguments.contains(MacFSWExtensionSetupSignal.launchArgument) {
+            Task { setUpExtensionForCLI() }
+        }
+    }
+
+    private func setUpExtensionForCLI() {
+        log.record(.info, "Extension setup requested by macfsw.", category: "SystemExtension")
+        NSApplication.shared.activate()
+        activateSystemExtension()
     }
 
     static func makeResearchSession(appVersion: String) -> MacFSWResearchSession {

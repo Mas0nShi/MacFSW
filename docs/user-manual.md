@@ -590,12 +590,15 @@ MacFSW ships a command-line tool, `macfsw`, inside the app bundle:
 /Applications/MacFSW.app/Contents/MacOS/macfsw
 ```
 
-It runs on its own: the MacFSW app does not need to be open. Recording still needs the Endpoint Extension enabled and approved once from the app (see section 3). Settings > CLI & Agents shows the path and copies the commands below.
+It runs on its own: the MacFSW app does not need to be open. Recording needs the Endpoint Extension, which only the app can install or update. Run `macfsw setup` once, and again after updating MacFSW: it opens the app, asks it to install or update the extension, and reports progress in Terminal until recording works. Settings > CLI & Agents shows the path and copies the commands below.
+
+`macfsw status` explains what is missing: the extension is not installed, is older than this MacFSW, or needs Full Disk Access. The app's sidebar shows the running extension version, notes when it just updated the extension, and offers Update Extension when an older one is still running.
 
 ### 15.1 Command Line
 
 ```bash
 macfsw status                                   # can the extension record?
+macfsw setup                                    # install or update it via the app
 macfsw record --duration 60 --out install.macfsw-session
 macfsw summary install.macfsw-session
 macfsw processes install.macfsw-session 'mutation:true'

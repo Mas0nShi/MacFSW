@@ -113,7 +113,7 @@ public actor MacFSWCaptureSession {
             guard !Task.isCancelled else {
                 return
             }
-            await self.stop()
+            self.stop()
         }
     }
 

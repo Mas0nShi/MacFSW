@@ -99,13 +99,6 @@ public struct SessionInfo: Codable, Equatable, Sendable {
     public var droppedEvents: UInt64
 }
 
-public struct ExtensionStatus: Codable, Equatable, Sendable {
-    public var reachable: Bool
-    public var authorized: Bool
-    public var fullDiskAccessRequired: Bool
-    public var message: String
-}
-
 public struct Status: Codable, Equatable, Sendable {
     public var `extension`: ExtensionStatus
     public var session: SessionInfo?

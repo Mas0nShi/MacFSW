@@ -57,6 +57,19 @@ final class MCPServerTests: XCTestCase {
         await server.stop()
     }
 
+    func testParsesTheActivatedExtensionFromSystemExtensionsList() {
+        let listing = """
+        2 extension(s)
+        --- com.apple.system_extension.endpoint_security
+        enabled\tactive\tteamID\tbundleID (version)\tname\t[state]
+        \t\tUYF535Y9QZ\tcom.mas0n.MacFSW.EndpointExtension (0.1.8/13)\tMacFSW Endpoint Extension\t[terminated waiting to uninstall on reboot]
+        *\t*\tUYF535Y9QZ\tcom.mas0n.MacFSW.EndpointExtension (0.1.8/14)\tMacFSW Endpoint Extension\t[activated enabled]
+        """
+        let version = SystemExtensionsList.parseActivatedVersion(of: "com.mas0n.MacFSW.EndpointExtension", in: listing)
+        XCTAssertEqual(version, MacFSWComponentVersion(shortVersion: "0.1.8", build: "14"))
+        XCTAssertNil(SystemExtensionsList.parseActivatedVersion(of: "com.other.Extension", in: listing))
+    }
+
     func testQuerySyntaxDescriptionListsEveryCatalogField() {
         for descriptor in MacFSWQueryFieldCatalog.descriptors {
             XCTAssertTrue(MacFSWMCPServer.querySyntax.contains("- \(descriptor.canonicalKey)"), descriptor.canonicalKey)

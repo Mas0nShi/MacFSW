@@ -18,6 +18,7 @@ struct MacFSWCommand: AsyncParsableCommand {
         version: Bundle.main.macfswVersion,
         subcommands: [
             StatusCommand.self,
+            SetupCommand.self,
             RecordCommand.self,
             QueryCommand.self,
             ProcessesCommand.self,
@@ -29,8 +30,20 @@ struct MacFSWCommand: AsyncParsableCommand {
 
     static func makeWorkspace() -> Workspace {
         Workspace(
-            client: MacFSWXPCCaptureClient(serviceName: Bundle.main.macfswXPCServiceName),
-            appVersion: Bundle.main.macfswVersion
+            client: makeClient(),
+            appVersion: Bundle.main.macfswVersion,
+            inspector: makeInspector()
+        )
+    }
+
+    static func makeClient() -> MacFSWXPCCaptureClient {
+        MacFSWXPCCaptureClient(serviceName: Bundle.main.macfswXPCServiceName, healthTimeoutSeconds: 3)
+    }
+
+    static func makeInspector() -> ExtensionInspector {
+        ExtensionInspector(
+            bundledVersion: Bundle.main.bundledEndpointExtensionVersion,
+            activatedVersion: { SystemExtensionsList.activatedVersion(of: MacFSWXPCDefaults.extensionBundleIdentifier) }
         )
     }
 }

@@ -8,10 +8,6 @@ public enum CommandError: Error, LocalizedError, Equatable, Sendable {
     case fileExists(String)
     case fileNotFound(String)
 
-    /// Only the app can install or update the extension: macOS accepts
-    /// activation requests solely from the app bundle that contains it.
-    static let extensionHint = "Open the MacFSW app to install or update the Endpoint Extension; macOS will ask you to approve it. This is also needed after updating MacFSW, until the app has replaced the previous extension."
-
     public var errorDescription: String? {
         switch self {
         case .noActiveSession:
@@ -19,7 +15,7 @@ public enum CommandError: Error, LocalizedError, Equatable, Sendable {
         case .eventNotFound(let id):
             "No event with id \(id.uuidString) in the active session."
         case .extensionUnavailable(let message):
-            "The MacFSW Endpoint Extension is not available: \(message) \(Self.extensionHint)"
+            "The MacFSW Endpoint Extension is not available: \(message) \(ExtensionInspector.setupHint)"
         case .fileNotFound(let path):
             "\(path) does not exist."
         case .fileExists(let path):
@@ -67,32 +63,21 @@ public actor Workspace {
 
     private let client: any MacFSWCaptureClient
     private let appVersion: String
+    private let inspector: ExtensionInspector
     private var active: Active?
 
-    public init(client: any MacFSWCaptureClient, appVersion: String) {
+    public init(
+        client: any MacFSWCaptureClient,
+        appVersion: String,
+        inspector: ExtensionInspector = ExtensionInspector(bundledVersion: nil)
+    ) {
         self.client = client
         self.appVersion = appVersion
+        self.inspector = inspector
     }
 
     public func status() async -> Status {
-        let health: ExtensionStatus
-        do {
-            let reported = try await client.health()
-            health = ExtensionStatus(
-                reachable: true,
-                authorized: reported.endpointSecurityAuthorized,
-                fullDiskAccessRequired: reported.fullDiskAccessHint,
-                message: reported.message
-            )
-        } catch {
-            health = ExtensionStatus(
-                reachable: false,
-                authorized: false,
-                fullDiskAccessRequired: false,
-                message: "\(Self.connectionFailureDescription(error)) \(CommandError.extensionHint)"
-            )
-        }
-        return Status(extension: health, session: try? await sessionInfo())
+        Status(extension: await inspector.inspect(client), session: try? await sessionInfo())
     }
 
     /// Starts recording. A session opened from a file is closed first so a
@@ -156,17 +141,6 @@ public actor Workspace {
             deliveredEvents: stats.deliveredEvents,
             droppedEvents: stats.droppedEvents
         )
-    }
-
-    /// XPC reports a refused or dropped connection as a bare Cocoa error
-    /// that names only the service.
-    private static func connectionFailureDescription(_ error: any Error) -> String {
-        let nsError = error as NSError
-        if nsError.domain == NSCocoaErrorDomain,
-           nsError.code == NSXPCConnectionInterrupted || nsError.code == NSXPCConnectionInvalid {
-            return "The Endpoint Extension is not installed, not running, or refused this connection."
-        }
-        return error.userFacingMessage
     }
 
     private func newCaptureSession(config: MacFSWCaptureConfig) throws -> Active {

@@ -64,3 +64,12 @@ private extension String {
         isEmpty ? nil : self
     }
 }
+
+/// How `macfsw setup` asks the app to install or update the Endpoint
+/// Extension: only the app bundle may submit that request to macOS.
+public enum MacFSWExtensionSetupSignal {
+    /// Passed when the CLI launches the app.
+    public static let launchArgument = "--setup-extension"
+    /// Posted for an app that is already running.
+    public static let notification = Notification.Name("com.mas0n.MacFSW.setupExtension")
+}
