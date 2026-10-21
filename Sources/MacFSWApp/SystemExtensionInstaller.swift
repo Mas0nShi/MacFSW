@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import MacFSWCore
 import Security
 import SystemExtensions
 
@@ -58,6 +59,7 @@ final class SystemExtensionInstaller: NSObject {
     static let shared = SystemExtensionInstaller()
 
     var onStateChange: ((MacFSWSystemExtensionInstallState, String) -> Void)?
+    var onUpdateStarted: ((String, String) -> Void)?
 
     private var submitted = false
     private var currentRequest: OSSystemExtensionRequest?
@@ -74,7 +76,7 @@ final class SystemExtensionInstaller: NSObject {
            !identifier.isEmpty {
             return identifier
         }
-        return "com.mas0n.MacFSW.EndpointExtension"
+        return MacFSWXPCDefaults.extensionBundleIdentifier
     }
 
     func activate() {
@@ -264,7 +266,7 @@ extension SystemExtensionInstaller: OSSystemExtensionRequestDelegate {
         currentRequest = nil
         currentRequestKind = nil
 
-        guard let bundledVersion = bundledExtensionVersion else {
+        guard let bundledVersion = Bundle.main.bundledEndpointExtensionVersion else {
             return
         }
 
@@ -275,37 +277,17 @@ extension SystemExtensionInstaller: OSSystemExtensionRequestDelegate {
         }
 
         let hasBundledVersion = activeProperties.contains {
-            $0.bundleShortVersion == bundledVersion.shortVersion
-                && $0.bundleVersion == bundledVersion.buildVersion
+            $0.bundleShortVersion == bundledVersion.shortVersion && $0.bundleVersion == bundledVersion.build
         }
 
         if !hasBundledVersion {
             let installed = activeProperties
-                .map { "\($0.bundleShortVersion)/\($0.bundleVersion)" }
+                .map { MacFSWComponentVersion(shortVersion: $0.bundleShortVersion, build: $0.bundleVersion).description }
                 .joined(separator: ", ")
-            publish(
-                .activating,
-                "Updating Endpoint Extension from \(installed) to \(bundledVersion.shortVersion)/\(bundledVersion.buildVersion)."
-            )
+            onUpdateStarted?(installed, bundledVersion.description)
+            publish(.activating, "Updating Endpoint Extension from \(installed) to \(bundledVersion).")
             submitted = false
             activate()
         }
-    }
-
-    private var bundledExtensionVersion: (shortVersion: String, buildVersion: String)? {
-        let extensionURL = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Library/SystemExtensions")
-            .appendingPathComponent("\(extensionIdentifier).systemextension")
-            .appendingPathComponent("Contents/Info.plist")
-
-        guard
-            let dictionary = NSDictionary(contentsOf: extensionURL),
-            let shortVersion = dictionary["CFBundleShortVersionString"] as? String,
-            let buildVersion = dictionary["CFBundleVersion"] as? String
-        else {
-            return nil
-        }
-
-        return (shortVersion, buildVersion)
     }
 }

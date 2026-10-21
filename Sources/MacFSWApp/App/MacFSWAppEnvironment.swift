@@ -5,6 +5,8 @@ import MacFSWCore
 @MainActor
 protocol SystemExtensionInstalling: AnyObject {
     var onStateChange: ((MacFSWSystemExtensionInstallState, String) -> Void)? { get set }
+    /// An older activated extension is being replaced: (installed, bundled).
+    var onUpdateStarted: ((String, String) -> Void)? { get set }
 
     func activate()
     func checkInstalledVersion()

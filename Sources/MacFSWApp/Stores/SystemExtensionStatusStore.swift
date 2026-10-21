@@ -7,6 +7,25 @@ import MacFSWCore
 final class SystemExtensionStatusStore {
     var installState: MacFSWSystemExtensionInstallState = .unknown
     var installMessage = "Checking System Extension readiness."
+    /// What the running extension reported; nil until a health check
+    /// succeeds, and for extensions too old to report it.
+    private(set) var runningVersion: MacFSWComponentVersion?
+    /// The extension packaged in this app — what activation installs.
+    let bundledVersion = Bundle.main.bundledEndpointExtensionVersion
+    /// Set when this launch replaced an older extension, so the update
+    /// stays visible after the status settles on Ready.
+    private(set) var completedUpdate: (from: String, to: String)?
+    @ObservationIgnored
+    private var pendingUpdate: (from: String, to: String)?
+
+    /// The running extension is not the one this app bundles: health
+    /// checks may pass while newer capabilities are missing.
+    var isRunningOutdatedExtension: Bool {
+        guard installState == .ready, let bundledVersion else {
+            return false
+        }
+        return runningVersion != bundledVersion
+    }
 
     @ObservationIgnored
     var onErrorMessage: ((String) -> Void)?
@@ -18,14 +37,27 @@ final class SystemExtensionStatusStore {
     init(installer: any SystemExtensionInstalling) {
         self.installer = installer
         self.installer.onStateChange = { [weak self] state, message in
-            self?.installState = state
-            self?.installMessage = message
-            if state == .failed {
-                self?.onErrorMessage?(message)
+            guard let self else {
+                return
             }
-            if state == .ready {
-                self?.onReady?()
+            installState = state
+            installMessage = message
+            switch state {
+            case .failed:
+                pendingUpdate = nil
+                onErrorMessage?(message)
+            case .ready:
+                if let pendingUpdate {
+                    completedUpdate = pendingUpdate
+                    self.pendingUpdate = nil
+                }
+                onReady?()
+            default:
+                break
             }
+        }
+        self.installer.onUpdateStarted = { [weak self] installed, bundled in
+            self?.pendingUpdate = (installed, bundled)
         }
     }
 
@@ -52,6 +84,7 @@ final class SystemExtensionStatusStore {
             return
         }
 
+        runningVersion = health.extensionVersion
         installState = .ready
         installMessage = health.endpointSecurityAuthorized
             ? "MacFSW Endpoint Extension is reachable and has Endpoint Security permission."

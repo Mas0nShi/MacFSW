@@ -8,8 +8,11 @@ struct SystemExtensionSettingsPane: View {
         Form {
             Section("Status") {
                 LabeledContent("State", value: model.extensionStatus.installState.title)
+                LabeledContent("Running", value: model.extensionStatus.runningVersion?.description ?? "Unknown")
+                LabeledContent("In This App", value: model.extensionStatus.bundledVersion?.description ?? "Not packaged")
                 Text(model.extensionStatus.installMessage)
                     .foregroundStyle(.secondary)
+                ExtensionVersionNote()
             }
 
             Section("Actions") {
@@ -80,6 +83,8 @@ struct SystemExtensionStatusView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(5)
+
+            ExtensionVersionNote()
 
             switch model.extensionStatus.installState {
             case .ready:
@@ -156,5 +161,39 @@ struct SystemExtensionStatusView: View {
             }
         }
         .buttonStyle(.borderless)
+    }
+}
+
+/// The extension's version story in one line: just updated, outdated
+/// (with a fix), or simply which version is running.
+private struct ExtensionVersionNote: View {
+    @Environment(MacFSWAppCoordinator.self) private var model
+
+    var body: some View {
+        let status = model.extensionStatus
+        if status.isRunningOutdatedExtension {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(
+                    "Running \(status.runningVersion?.description ?? "an older extension"); this app includes \(status.bundledVersion?.description ?? "a newer one").",
+                    systemImage: "exclamationmark.arrow.circlepath"
+                )
+                .foregroundStyle(.orange)
+                Button {
+                    model.activateSystemExtension()
+                } label: {
+                    Label("Update Extension", systemImage: "arrow.down.circle")
+                }
+                .buttonStyle(.borderless)
+            }
+            .font(.caption)
+        } else if let update = status.completedUpdate {
+            Label("Updated from \(update.from) to \(update.to).", systemImage: "checkmark.circle")
+                .font(.caption)
+                .foregroundStyle(.green)
+        } else if let running = status.runningVersion {
+            Text("Version \(running.description)")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
     }
 }

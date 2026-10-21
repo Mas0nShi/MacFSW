@@ -256,6 +256,28 @@ final class MacFSWAppTests: XCTestCase {
         XCTAssertEqual(installer.checkInstalledVersionCallCount, 1)
     }
 
+    @MainActor
+    func testExtensionUpdateStaysVisibleAfterReadyAndIsDroppedOnFailure() {
+        let installer = TestSystemExtensionInstaller()
+        let store = SystemExtensionStatusStore(installer: installer)
+
+        installer.onUpdateStarted?("0.1.8 (13)", "0.1.8 (14)")
+        installer.onStateChange?(.activating, "Updating")
+        installer.onStateChange?(.ready, "Done")
+        store.applyHealth(MacFSWCaptureHealth(endpointSecurityAuthorized: true, extensionVersion: MacFSWComponentVersion(shortVersion: "0.1.8", build: "14")))
+
+        XCTAssertEqual(store.completedUpdate?.from, "0.1.8 (13)")
+        XCTAssertEqual(store.completedUpdate?.to, "0.1.8 (14)")
+        XCTAssertEqual(store.runningVersion?.build, "14")
+
+        let failingInstaller = TestSystemExtensionInstaller()
+        let failed = SystemExtensionStatusStore(installer: failingInstaller)
+        failingInstaller.onUpdateStarted?("0.1.8 (13)", "0.1.8 (14)")
+        failingInstaller.onStateChange?(.failed, "Denied")
+        failingInstaller.onStateChange?(.ready, "Ready")
+        XCTAssertNil(failed.completedUpdate)
+    }
+
     private func makeProcessSummary(id: String, lifecycle: MacFSWProcessLifecycle) -> MacFSWProcessSummary {
         MacFSWProcessSummary(
             id: id,
@@ -279,6 +301,7 @@ private struct TestPlainError: Error {}
 @MainActor
 private final class TestSystemExtensionInstaller: SystemExtensionInstalling {
     var onStateChange: ((MacFSWSystemExtensionInstallState, String) -> Void)?
+    var onUpdateStarted: ((String, String) -> Void)?
     private(set) var checkInstalledVersionCallCount = 0
 
     func activate() {}
