@@ -55,7 +55,8 @@ public final class MacFSWEndpointCaptureService: NSObject, MacFSWCaptureXPCProto
         let activeCapture = activeCapture
         lock.unlock()
 
-        let health = activeCapture?.health() ?? EndpointSecurityCapture.authorizationHealth()
+        var health = activeCapture?.health() ?? EndpointSecurityCapture.authorizationHealth()
+        health.extensionVersion = Bundle.main.macfswComponentVersion
 
         do {
             reply(try encoder.encode(health), nil)

@@ -2,6 +2,7 @@ import Foundation
 
 public enum MacFSWXPCDefaults {
     public static let serviceName = "UYF535Y9QZ.com.mas0n.MacFSW.EndpointExtension.xpc"
+    public static let extensionBundleIdentifier = "com.mas0n.MacFSW.EndpointExtension"
 }
 
 public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Sendable {

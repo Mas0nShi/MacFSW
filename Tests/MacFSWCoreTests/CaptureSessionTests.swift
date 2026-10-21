@@ -263,3 +263,16 @@ final class EventStoreAgentQueryTests: XCTestCase {
         try await store.cleanupBackingStore()
     }
 }
+
+final class CaptureHealthVersionTests: XCTestCase {
+    func testHealthFromOlderExtensionsDecodesWithoutAVersion() throws {
+        var legacy = try JSONSerialization.jsonObject(with: JSONEncoder.macfsw.encode(MacFSWCaptureHealth())) as! [String: Any]
+        legacy["extensionVersion"] = nil
+        let decoded = try JSONDecoder.macfsw.decode(MacFSWCaptureHealth.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertNil(decoded.extensionVersion)
+
+        let current = MacFSWCaptureHealth(extensionVersion: MacFSWComponentVersion(shortVersion: "0.1.8", build: "14"))
+        let roundTripped = try JSONDecoder.macfsw.decode(MacFSWCaptureHealth.self, from: JSONEncoder.macfsw.encode(current))
+        XCTAssertEqual(roundTripped.extensionVersion?.description, "0.1.8 (14)")
+    }
+}

@@ -117,6 +117,9 @@ public struct MacFSWCaptureHealth: Codable, Equatable, Sendable {
     public var fullDiskAccessHint: Bool
     public var stats: MacFSWCaptureStats
     public var message: String
+    /// The running extension's own version; nil from extensions built
+    /// before it was reported.
+    public var extensionVersion: MacFSWComponentVersion?
 
     public init(
         state: MacFSWCaptureState = .idle,
@@ -124,7 +127,8 @@ public struct MacFSWCaptureHealth: Codable, Equatable, Sendable {
         endpointSecurityAuthorized: Bool = false,
         fullDiskAccessHint: Bool = false,
         stats: MacFSWCaptureStats = MacFSWCaptureStats(),
-        message: String = "Capture is idle."
+        message: String = "Capture is idle.",
+        extensionVersion: MacFSWComponentVersion? = nil
     ) {
         self.state = state
         self.endpointSecurityAvailable = endpointSecurityAvailable
@@ -132,6 +136,7 @@ public struct MacFSWCaptureHealth: Codable, Equatable, Sendable {
         self.fullDiskAccessHint = fullDiskAccessHint
         self.stats = stats
         self.message = message
+        self.extensionVersion = extensionVersion
     }
 }
 
