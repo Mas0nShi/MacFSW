@@ -23,17 +23,11 @@ let package = Package(
             name: "MacFSWCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
-            ],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
             ]
         ),
         .target(
             name: "MacFSWAnalysis",
             dependencies: ["MacFSWCore"],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ],
             linkerSettings: [
                 .linkedFramework("Security")
             ]
@@ -48,9 +42,6 @@ let package = Package(
             resources: [
                 .process("Resources/MacFSW-AppIcon.icns"),
             ],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ],
             linkerSettings: [
                 .linkedFramework("Security"),
                 .linkedFramework("SystemExtensions")
@@ -59,9 +50,6 @@ let package = Package(
         .target(
             name: "MacFSWSystemExtension",
             dependencies: ["MacFSWCore"],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ],
             linkerSettings: [
                 .linkedFramework("Security"),
                 .linkedLibrary("EndpointSecurity"),
@@ -71,9 +59,6 @@ let package = Package(
         .executableTarget(
             name: "MacFSWEndpointExtension",
             dependencies: ["MacFSWSystemExtension"],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ],
             linkerSettings: [
                 .linkedFramework("Security"),
                 .linkedLibrary("EndpointSecurity"),
