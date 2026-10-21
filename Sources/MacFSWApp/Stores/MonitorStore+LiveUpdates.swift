@@ -122,8 +122,6 @@ extension MonitorStore {
                 await refreshFilteredEvents()
                 return
             }
-            let previousCount = visibleEventCount
-            let previousTotal = totalMatchingEventCount
             let updatedSnapshot = try await eventStore.appendRowsToResultSnapshot(
                 snapshot,
                 rows: appendedSummaries,
@@ -137,59 +135,21 @@ extension MonitorStore {
                 )
                 return
             }
+            // The monitor never applies a row limit, so live events only
+            // ever extend the result at its tail.
             activeSnapshot = updatedSnapshot
-            let total = updatedSnapshot.totalCount
-            let count = updatedSnapshot.visibleCount
             applyOperationSummaryDelta(from: appendedSummaries)
-            let previousWindowStart = max(0, previousTotal - previousCount)
-            let windowStart = max(0, total - count)
-            let windowShift = max(0, windowStart - previousWindowStart)
-            let appendedVisibleCount = min(visibleMutationCount, count)
-            var didPrepareChangedRows = false
-
-            if windowShift > 0 {
-                didPrepareChangedRows = slideRowWindowCache(
-                    shiftedBy: windowShift,
-                    appendedVisibleCount: appendedVisibleCount,
-                    appendedSummaries: appendedSummaries,
-                    visibleCount: count
-                )
-            } else if count > previousCount {
-                didPrepareChangedRows = cacheAppendedRows(
-                    appendedSummaries,
-                    previousCount: previousCount,
-                    newCount: count
-                )
-            }
+            let previousCount = visibleEventCount
+            let count = updatedSnapshot.visibleCount
+            let didCacheAppendedRows = cacheAppendedRows(
+                appendedSummaries,
+                previousCount: previousCount,
+                newCount: count
+            )
             visibleEventCount = count
-            totalMatchingEventCount = total
-            if windowShift > 0 {
-                if !didPrepareChangedRows {
-                    resetRowCache(resetTable: false)
-                }
-            } else if activeQuery.hasVisibleLimit, visibleMutationCount > 0, count == activeQuery.limit, previousCount == count {
-                resetRowCache(resetTable: false)
-            } else if count < previousCount {
-                resetRowCache(resetTable: true)
-            } else if count > previousCount {
-                if !didPrepareChangedRows {
-                    invalidateRowPages(for: previousCount..<count)
-                }
-            }
-
-            if let currentSelectedEventID = selectedEventID {
-                if let row = try await eventStore.visibleRowIndex(
-                    of: currentSelectedEventID,
-                    in: updatedSnapshot
-                ) {
-                    selectedRow = row
-                } else {
-                    selectedEventID = nil
-                    selectedRow = nil
-                    selectedEvent = nil
-                    selectedEventIsLoading = false
-                    selectionResetSerial += 1
-                }
+            totalMatchingEventCount = updatedSnapshot.totalCount
+            if count > previousCount, !didCacheAppendedRows {
+                invalidateRowPages(for: previousCount..<count)
             }
 
             if followMode == .live, isViewingLiveEdge {

@@ -84,51 +84,6 @@ extension MonitorStore {
         return true
     }
 
-    func slideRowWindowCache(
-        shiftedBy shiftCount: Int,
-        appendedVisibleCount: Int,
-        appendedSummaries: [MacFSWEventRowSummary],
-        visibleCount: Int
-    ) -> Bool {
-        let shiftCount = min(max(0, shiftCount), visibleCount)
-        let appendedVisibleCount = min(max(0, appendedVisibleCount), visibleCount)
-        guard shiftCount > 0, appendedVisibleCount > 0, appendedSummaries.count >= appendedVisibleCount else {
-            return false
-        }
-
-        queryGeneration += 1
-        cancelRowLoads()
-
-        let appendedStart = visibleCount - appendedVisibleCount
-        var shiftedCache: [Int: MacFSWEventRowSummary] = [:]
-        shiftedCache.reserveCapacity(min(rowCache.count + appendedVisibleCount, visibleCount))
-
-        for (row, summary) in rowCache {
-            let shiftedRow = row - shiftCount
-            if shiftedRow >= 0, shiftedRow < appendedStart {
-                shiftedCache[shiftedRow] = summary
-            }
-        }
-
-        for (offset, summary) in appendedSummaries.suffix(appendedVisibleCount).enumerated() {
-            shiftedCache[appendedStart + offset] = summary
-        }
-
-        rowCache = shiftedCache
-        loadedRowPages.removeAll(keepingCapacity: true)
-        rowPageAccessTicks.removeAll(keepingCapacity: true)
-        if lastRequestedRowRange.lowerBound < lastRequestedRowRange.upperBound {
-            let shiftedLower = max(0, lastRequestedRowRange.lowerBound - shiftCount)
-            let shiftedUpper = max(shiftedLower, min(visibleCount, lastRequestedRowRange.upperBound - shiftCount))
-            lastRequestedRowRange = shiftedLower..<shiftedUpper
-        }
-        rebuildLoadedPages(visibleCount: visibleCount)
-        evictRowPagesIfNeeded(visibleCount: visibleCount)
-        rowCacheVersion += 1
-        rowCacheResetSerial += 1
-        return true
-    }
-
     func rebuildLoadedPages(visibleCount: Int) {
         let pages = Set(rowCache.keys.map { $0 / rowPageSize })
         for page in pages {
