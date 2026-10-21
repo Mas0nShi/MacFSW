@@ -20,7 +20,7 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
         try await withCheckedThrowingContinuation { continuation in
             let connection = NSXPCConnection(machServiceName: serviceName, options: [])
             connection.remoteObjectInterface = MacFSWXPCInterfaces.captureServiceInterface()
-            let state = XPCRequestState(connection: connection, continuation: continuation)
+            let state = XPCRequestState(connection: connection, continuation: continuation, keepsConnection: false)
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
                 state.finish(.failure(error))
             } as? MacFSWCaptureXPCProtocol
@@ -31,8 +31,12 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
             }
 
             connection.resume()
-            Task {
-                try? await Task.sleep(nanoseconds: healthTimeoutSeconds * 1_000_000_000)
+            let timeoutSeconds = healthTimeoutSeconds
+            state.timeout = Task {
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                guard !Task.isCancelled else {
+                    return
+                }
                 state.finish(.failure(MacFSWClientError.xpcUnavailable("Health check timed out.")))
             }
             proxy.health { data, errorMessage in
@@ -54,7 +58,7 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
         connection.exportedObject = receiver
 
         return try await withCheckedThrowingContinuation { continuation in
-            let state = XPCRequestState(connection: connection, continuation: continuation)
+            let state = XPCRequestState(connection: connection, continuation: continuation, keepsConnection: true)
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
                 onFinish(error)
                 state.finish(.failure(error))
@@ -165,28 +169,44 @@ private final class XPCEventReceiver: NSObject, MacFSWCaptureEventSubscriber, @u
     }
 }
 
+/// Resumes a continuation exactly once for an XPC request, whichever of
+/// the reply, the error handler, or the timeout comes first. One-shot
+/// requests close their connection when done; a capture stream keeps it,
+/// since the connection's lifetime is the capture's.
 private final class XPCRequestState<T: Sendable>: @unchecked Sendable {
     private let connection: NSXPCConnection
     private let continuation: CheckedContinuation<T, Error>
+    private let keepsConnection: Bool
     private let lock = NSLock()
     private var didFinish = false
+    private var timeoutTask: Task<Void, Never>?
 
-    init(connection: NSXPCConnection, continuation: CheckedContinuation<T, Error>) {
+    init(connection: NSXPCConnection, continuation: CheckedContinuation<T, Error>, keepsConnection: Bool) {
         self.connection = connection
         self.continuation = continuation
+        self.keepsConnection = keepsConnection
+    }
+
+    var timeout: Task<Void, Never>? {
+        get { lock.withLock { timeoutTask } }
+        set { lock.withLock { timeoutTask = newValue } }
     }
 
     func finish(_ result: Result<T, Error>) {
-        lock.lock()
-        guard !didFinish else {
-            lock.unlock()
+        let (isFirst, timeout) = lock.withLock { () -> (Bool, Task<Void, Never>?) in
+            defer { didFinish = true }
+            return (!didFinish, timeoutTask)
+        }
+        guard isFirst else {
             return
         }
-        didFinish = true
-        lock.unlock()
+        timeout?.cancel()
 
         switch result {
         case .success(let value):
+            if !keepsConnection {
+                connection.invalidate()
+            }
             continuation.resume(returning: value)
         case .failure(let error):
             connection.invalidate()
