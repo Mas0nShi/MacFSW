@@ -100,29 +100,6 @@ final class MacFSWCoreTests: XCTestCase {
         XCTAssertTrue(thirdPartyQuery.matches(MacFSWFileEvent(eventType: .write, process: thirdPartyProcess, targetPath: "/tmp/d")))
     }
 
-    func testInMemoryStoreFiltersEvents() async {
-        let store = MacFSWInMemoryEventStore(maxEvents: 10_000)
-        let process = MacFSWProcessIdentity(
-            pid: 42,
-            auditToken: "test",
-            executablePath: "/usr/libexec/tester",
-            processName: "tester"
-        )
-        let event = MacFSWFileEvent(
-            eventType: .write,
-            process: process,
-            targetPath: "/Library/LaunchAgents/com.example.agent.plist",
-            uid: 501,
-            gid: 20
-        )
-
-        _ = await store.append([event])
-        let results = await store.query(MacFSWQueryParser.parse("process:tester path:LaunchAgents"))
-
-        XCTAssertEqual(results.count, 1)
-        XCTAssertEqual(results.first?.eventType, .write)
-    }
-
     func testSQLiteSessionArchiveRoundTrips() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("macfsw-tests-\(UUID().uuidString)", isDirectory: true)
@@ -198,7 +175,7 @@ final class MacFSWCoreTests: XCTestCase {
             try await group.waitForAll()
         }
 
-        let events = try await storeA.snapshot()
+        let events = try await storeA.events(matching: MacFSWEventQuery())
         let sequences = events.map(\.sequence).sorted()
 
         XCTAssertEqual(events.count, 100)
@@ -603,40 +580,6 @@ final class MacFSWCoreTests: XCTestCase {
             limit: 50
         )
         XCTAssertEqual(nonFacetable, [])
-    }
-
-    func testInMemoryDistinctValuesFacetByQuery() async {
-        let store = MacFSWInMemoryEventStore(maxEvents: 1_000)
-        let tester = MacFSWProcessIdentity(
-            pid: 42,
-            auditToken: "test",
-            executablePath: "/usr/libexec/tester",
-            processName: "tester"
-        )
-        let other = MacFSWProcessIdentity(
-            pid: 43,
-            auditToken: "other",
-            executablePath: "/usr/libexec/other",
-            processName: "other"
-        )
-        _ = await store.append([
-            MacFSWFileEvent(eventType: .write, process: tester, targetPath: "/tmp/a"),
-            MacFSWFileEvent(eventType: .unlink, process: other, targetPath: "/tmp/b"),
-        ])
-
-        let writers = await store.distinctValues(
-            for: .processName,
-            matching: MacFSWQueryParser.parse("op:write"),
-            limit: 10
-        )
-        XCTAssertEqual(writers, [MacFSWFacetValue(value: "tester", count: 1)])
-
-        let pids = await store.distinctValues(
-            for: .pid,
-            matching: MacFSWQueryParser.parse(""),
-            limit: 10
-        )
-        XCTAssertEqual(Set(pids.map(\.value)), ["42", "43"])
     }
 
     func testFieldCatalogCoversEveryQueryField() {

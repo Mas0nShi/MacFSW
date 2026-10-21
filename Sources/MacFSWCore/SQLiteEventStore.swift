@@ -18,7 +18,7 @@ public enum MacFSWSQLiteStoreError: Error, LocalizedError, Sendable {
     }
 }
 
-public actor MacFSWSQLiteEventStore: MacFSWEventStore {
+public actor MacFSWSQLiteEventStore {
     public nonisolated let url: URL
     private let dbQueue: DatabaseQueue
     private let ownedDirectoryURL: URL?
@@ -151,11 +151,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         nextSequence = 1
     }
 
-    public func replace(with events: [MacFSWFileEvent]) async throws {
-        try await clear()
-        _ = try await appendReturningEvents(events)
-    }
-
     public func count(matching query: MacFSWEventQuery) async throws -> Int {
         let total = try await totalCount(matching: query)
         return query.visibleCount(totalCount: total)
@@ -188,10 +183,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
             visibleCount: visibleCount
         )
         return MacFSWEventResultSnapshot(id: snapshotID, totalCount: total, visibleCount: visibleCount)
-    }
-
-    public func deleteResultSnapshot(_ snapshotID: String) async throws {
-        try await deleteResultSnapshots([snapshotID])
     }
 
     public func deleteResultSnapshots(_ snapshotIDs: [String]) async throws {
@@ -287,7 +278,7 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         )
     }
 
-    public func rowSummaries(
+    private func rowSummaries(
         matching query: MacFSWEventQuery,
         visibleRange: Range<Int>,
         totalCount: Int,
@@ -387,7 +378,7 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         )
     }
 
-    public func event(
+    private func event(
         matching query: MacFSWEventQuery,
         visibleRow: Int,
         totalCount: Int,
@@ -514,7 +505,7 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
         )
     }
 
-    public func visibleRowIndex(
+    private func visibleRowIndex(
         of id: UUID,
         matching query: MacFSWEventQuery,
         totalCount: Int,
@@ -546,16 +537,6 @@ public actor MacFSWSQLiteEventStore: MacFSWEventStore {
             return nil
         }
         return allRowsIndex - visibleStart
-    }
-
-    public func snapshot() async throws -> [MacFSWFileEvent] {
-        try await dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT * FROM events ORDER BY sequence ASC"
-            )
-            return try rows.map(eventRecord(from:))
-        }
     }
 
     public func stats() async throws -> MacFSWCaptureStats {
