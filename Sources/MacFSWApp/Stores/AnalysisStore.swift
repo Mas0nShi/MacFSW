@@ -81,10 +81,6 @@ final class AnalysisStore {
         runError = nil
     }
 
-    func clearProcessSelection() {
-        selectedProcessID = nil
-    }
-
     func cancelTask() {
         analysisTask?.cancel()
         analysisTask = nil
@@ -153,12 +149,10 @@ final class AnalysisStore {
                     outputLanguageName: settings.outputLanguage.promptName(resolvingSystemWith: .current),
                     eventSampleCharacterBudget: settings.promptEventCharacterBudget
                 )
-                await MainActor.run {
-                    guard let self, self.analysisGeneration == generation else {
-                        return
-                    }
-                    self.statusText = "Analyzing \(target.displayName)..."
+                guard let self, self.analysisGeneration == generation else {
+                    return
                 }
+                self.statusText = "Analyzing \(target.displayName)..."
 
                 let request = MacFSWLLMRequest(
                     settings: settings,
@@ -191,21 +185,17 @@ final class AnalysisStore {
                     }
                     lastPublishedLength = joined.count
                     lastPublishedAt = now
-                    await MainActor.run {
-                        guard let self, self.analysisGeneration == generation else {
-                            return
-                        }
-                        self.streamingMarkdown = joined
+                    guard analysisGeneration == generation else {
+                        return
                     }
+                    self.streamingMarkdown = joined
                 }
                 let accumulated = buffer.joined()
                 if accumulated.count != lastPublishedLength {
-                    await MainActor.run {
-                        guard let self, self.analysisGeneration == generation else {
-                            return
-                        }
-                        self.streamingMarkdown = accumulated
+                    guard analysisGeneration == generation else {
+                        return
                     }
+                    self.streamingMarkdown = accumulated
                 }
 
                 let finalMarkdown = accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -226,32 +216,28 @@ final class AnalysisStore {
                     templateName: template.name,
                     markdown: finalMarkdown
                 )
-                await MainActor.run {
-                    guard let self, self.analysisGeneration == generation else {
-                        return
-                    }
-                    self.results.insert(result, at: 0)
-                    self.selectedResultID = result.id
-                    self.streamingMarkdown = ""
-                    self.isRunning = false
-                    self.analysisTask = nil
-                    self.statusText = "Completed \(target.displayName)."
+                guard analysisGeneration == generation else {
+                    return
                 }
+                self.results.insert(result, at: 0)
+                self.selectedResultID = result.id
+                self.streamingMarkdown = ""
+                self.isRunning = false
+                self.analysisTask = nil
+                self.statusText = "Completed \(target.displayName)."
             } catch {
-                await MainActor.run {
-                    guard let self, self.analysisGeneration == generation else {
-                        return
-                    }
-                    if ErrorPresentation.isCancellationError(error) {
-                        self.statusText = self.streamingMarkdown.isEmpty ? "Analysis cancelled." : "Analysis cancelled. Partial output is still visible."
-                    } else {
-                        self.statusText = error.userFacingMessage
-                        self.runError = Self.analysisError(from: error, settings: settings)
-                        reportError(error)
-                    }
-                    self.isRunning = false
-                    self.analysisTask = nil
+                guard let self, self.analysisGeneration == generation else {
+                    return
                 }
+                if ErrorPresentation.isCancellationError(error) {
+                    self.statusText = self.streamingMarkdown.isEmpty ? "Analysis cancelled." : "Analysis cancelled. Partial output is still visible."
+                } else {
+                    self.statusText = error.userFacingMessage
+                    self.runError = Self.analysisError(from: error, settings: settings)
+                    reportError(error)
+                }
+                self.isRunning = false
+                self.analysisTask = nil
             }
         }
     }
@@ -280,19 +266,15 @@ final class AnalysisStore {
                         break
                     }
                 }
-                await MainActor.run {
-                    self?.connectionTestState = receivedText
-                        ? .succeeded("Connection OK")
-                        : .failed(MacFSWConnectionTestError(
-                            title: "No Text Returned",
-                            message: "The provider accepted the request but did not return text output.",
-                            diagnostic: "Endpoint: \(settings.endpoint.rawValue)\nModel: \(settings.model)\nBase URL: \(settings.baseURL)"
-                        ))
-                }
+                self?.connectionTestState = receivedText
+                    ? .succeeded("Connection OK")
+                    : .failed(MacFSWConnectionTestError(
+                        title: "No Text Returned",
+                        message: "The provider accepted the request but did not return text output.",
+                        diagnostic: "Endpoint: \(settings.endpoint.rawValue)\nModel: \(settings.model)\nBase URL: \(settings.baseURL)"
+                    ))
             } catch {
-                await MainActor.run {
-                    self?.connectionTestState = .failed(Self.connectionTestError(from: error, settings: settings))
-                }
+                self?.connectionTestState = .failed(Self.connectionTestError(from: error, settings: settings))
             }
         }
     }

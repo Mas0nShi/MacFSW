@@ -26,7 +26,7 @@ struct DashboardView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if model.selectedPage == .monitor, model.shouldShowInspector {
+            if model.selectedPage == .monitor, model.monitor.shouldShowInspector {
                 InspectorResizeHandle(
                     width: $inspectorWidth,
                     range: Self.inspectorWidthRange,
@@ -34,7 +34,7 @@ struct DashboardView: View {
                 )
                 .transition(.opacity)
 
-                InspectorView(event: model.selectedEvent, isLoading: model.selectedEventIsLoading)
+                InspectorView(event: model.monitor.selectedEvent, isLoading: model.monitor.selectedEventIsLoading)
                     .frame(width: clampedInspectorWidth)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -103,22 +103,22 @@ struct StatusBar: View {
             Divider()
                 .frame(height: 14)
 
-            Text("\(model.captureStats.deliveredEvents) captured")
+            Text("\(model.session.captureStats.deliveredEvents) captured")
                 .monospacedDigit()
-            Text("\(model.visibleEventCount) shown")
+            Text("\(model.monitor.visibleEventCount) shown")
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-            if model.captureStats.droppedEvents > 0 {
-                Text("\(model.captureStats.droppedEvents) dropped")
+            if model.session.captureStats.droppedEvents > 0 {
+                Text("\(model.session.captureStats.droppedEvents) dropped")
                     .monospacedDigit()
                     .foregroundStyle(.orange)
             }
-            if model.captureState == .recording {
+            if model.session.captureState == .recording {
                 Label(tableRefreshTitle, systemImage: tableRefreshSymbol)
                     .foregroundStyle(tableRefreshColor)
                     .frame(width: 68, alignment: .leading)
             }
-            if model.captureState == .recording, model.followMode == .live, !model.isViewingLiveEdge {
+            if model.session.captureState == .recording, model.monitor.followMode == .live, !model.monitor.isViewingLiveEdge {
                 Label("Viewing history", systemImage: "arrow.up")
                     .foregroundStyle(.secondary)
             }
@@ -130,7 +130,7 @@ struct StatusBar: View {
                     .foregroundStyle(.orange)
                     .lineLimit(1)
             }
-            if let lastUpdatedAt = model.lastUpdatedAt {
+            if let lastUpdatedAt = model.monitor.lastUpdatedAt {
                 Text("Updated \(lastUpdatedAt.formatted(date: .omitted, time: .standard))")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -144,7 +144,7 @@ struct StatusBar: View {
     }
 
     private var bottomCaptureIsRecording: Bool {
-        switch model.captureState {
+        switch model.session.captureState {
         case .connecting, .recording, .stopping:
             true
         case .idle, .stopped, .degraded, .failed:
@@ -157,15 +157,15 @@ struct StatusBar: View {
     }
 
     private var tableRefreshTitle: String {
-        model.followMode == .live ? "Live" : "Paused"
+        model.monitor.followMode == .live ? "Live" : "Paused"
     }
 
     private var tableRefreshSymbol: String {
-        model.followMode == .live ? "dot.radiowaves.left.and.right" : "pause.circle"
+        model.monitor.followMode == .live ? "dot.radiowaves.left.and.right" : "pause.circle"
     }
 
     private var tableRefreshColor: Color {
-        model.followMode == .live ? .green : .orange
+        model.monitor.followMode == .live ? .green : .orange
     }
 }
 

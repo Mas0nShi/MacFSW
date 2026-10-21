@@ -34,7 +34,7 @@ struct AnalysisHeaderView: View {
                         .font(.headline)
                     MacFSWBetaBadge()
                 }
-                Text(model.analysisStatusText)
+                Text(model.analysis.statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -53,15 +53,15 @@ struct AnalysisHeaderView: View {
             }
 
             Picker("Template", selection: Binding(
-                get: { model.selectedAnalysisTemplateID },
-                set: { model.selectedAnalysisTemplateID = $0 }
+                get: { model.analysisTemplates.selectedTemplateID },
+                set: { model.analysisTemplates.selectedTemplateID = $0 }
             )) {
                 Section("Built-in") {
-                    ForEach(model.analysisTemplates.filter(\.isBuiltIn)) { template in
+                    ForEach(model.analysisTemplates.allTemplates.filter(\.isBuiltIn)) { template in
                         Text(template.name).tag(template.id)
                     }
                 }
-                let custom = model.analysisTemplates.filter { !$0.isBuiltIn }
+                let custom = model.analysisTemplates.allTemplates.filter { !$0.isBuiltIn }
                 if !custom.isEmpty {
                     Section("Custom") {
                         ForEach(custom) { template in
@@ -73,11 +73,11 @@ struct AnalysisHeaderView: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .frame(maxWidth: 200)
-            .disabled(model.isAnalysisRunning)
+            .disabled(model.analysis.isRunning)
 
-            if model.isAnalysisRunning {
+            if model.analysis.isRunning {
                 Button {
-                    model.cancelAnalysis()
+                    model.analysis.cancelAnalysis()
                 } label: {
                     Label("Cancel", systemImage: "xmark.circle")
                 }
@@ -91,11 +91,11 @@ struct AnalysisHeaderView: View {
             }
 
             Button {
-                model.clearAnalysisHistory()
+                model.analysis.clearHistory()
             } label: {
                 Label("Clear History", systemImage: "trash")
             }
-            .disabled(model.analysisResults.isEmpty)
+            .disabled(model.analysis.results.isEmpty)
         }
         .buttonStyle(.bordered)
         .padding(.horizontal, 16)
@@ -117,7 +117,7 @@ struct AnalysisHistorySidebar: View {
                     HStack {
                         SidebarSectionHeader("Reports")
                         Spacer()
-                        Text("\(model.analysisResults.count)")
+                        Text("\(model.analysis.results.count)")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -128,7 +128,7 @@ struct AnalysisHistorySidebar: View {
                         .lineLimit(1)
                 }
 
-                if model.analysisResults.isEmpty {
+                if model.analysis.results.isEmpty {
                     Text("No reports")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -137,13 +137,13 @@ struct AnalysisHistorySidebar: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 8) {
-                            ForEach(model.analysisResults) { result in
+                            ForEach(model.analysis.results) { result in
                                 Button {
                                     model.selectAnalysis(result)
                                 } label: {
                                     AnalysisHistoryRow(
                                         result: result,
-                                        isSelected: model.selectedAnalysisID == result.id
+                                        isSelected: model.analysis.selectedResultID == result.id
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -194,20 +194,20 @@ struct AnalysisReportPane: View {
 
     var body: some View {
         Group {
-            if model.isAnalysisRunning || !model.streamingAnalysisMarkdown.isEmpty {
+            if model.analysis.isRunning || !model.analysis.streamingMarkdown.isEmpty {
                 AnalysisMarkdownReportView(
                     title: model.selectedAnalysisProcess?.displayName ?? "Running Analysis",
                     subtitle: "Streaming response",
                     eventsLabel: nil,
                     pathCount: nil,
                     operationCount: nil,
-                    markdown: model.streamingAnalysisMarkdown,
-                    isStreaming: model.isAnalysisRunning,
-                    error: model.analysisRunError
+                    markdown: model.analysis.streamingMarkdown,
+                    isStreaming: model.analysis.isRunning,
+                    error: model.analysis.runError
                 )
-            } else if let error = model.analysisRunError {
+            } else if let error = model.analysis.runError {
                 AnalysisErrorPane(error: error)
-            } else if let result = model.selectedAnalysis {
+            } else if let result = model.analysis.selectedAnalysis {
                 AnalysisMarkdownReportView(
                     title: result.processDisplayName,
                     subtitle: "\(result.scope) · \(result.providerSummary) · \(result.templateName) · \(String(format: "%.1fs", result.durationSeconds))",

@@ -81,10 +81,7 @@ final class ProcessSidebarStore {
             guard !Task.isCancelled else {
                 return
             }
-            await MainActor.run {
-                self?.publishTask = nil
-                self?.publish()
-            }
+            self?.publish()
         }
     }
 
@@ -100,5 +97,13 @@ final class ProcessSidebarStore {
         )
         filteredProcessSummaries = filtered
         filteredProcessGroups = ProcessSummaryReducer.groups(from: filtered)
+    }
+
+    func toggleProcessGroup(_ id: String) {
+        if expandedProcessGroupIDs.contains(id) {
+            expandedProcessGroupIDs.remove(id)
+        } else {
+            expandedProcessGroupIDs.insert(id)
+        }
     }
 }

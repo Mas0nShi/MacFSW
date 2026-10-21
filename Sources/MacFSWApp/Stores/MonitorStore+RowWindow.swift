@@ -1,11 +1,7 @@
-import AppKit
-import Darwin
-import MacFSWAnalysis
+import Foundation
 import MacFSWCore
-import SwiftUI
-import UniformTypeIdentifiers
 
-extension MacFSWAppCoordinator {
+extension MonitorStore {
     func cachedRow(at row: Int) -> MacFSWEventRowSummary? {
         markRowPageAccess(row / rowPageSize)
         return rowCache[row]
@@ -238,31 +234,27 @@ extension MacFSWAppCoordinator {
                 guard !Task.isCancelled else {
                     return
                 }
-                await MainActor.run {
-                    guard let self, self.queryGeneration == generation else {
-                        return
-                    }
-                    self.inFlightRowPages.remove(page)
-                    self.rowLoadTasks[page] = nil
-                    for (offset, row) in rows.enumerated() {
-                        self.rowCache[range.lowerBound + offset] = row
-                    }
-                    self.loadedRowPages.insert(page)
-                    self.markRowPageAccess(page)
-                    self.promoteSelectedRowIfLoaded(in: range)
-                    self.evictRowPagesIfNeeded()
-                    self.rowCacheVersion += 1
-                    self.lastUpdatedAt = Date()
+                guard let self, self.queryGeneration == generation else {
+                    return
                 }
+                self.inFlightRowPages.remove(page)
+                self.rowLoadTasks[page] = nil
+                for (offset, row) in rows.enumerated() {
+                    self.rowCache[range.lowerBound + offset] = row
+                }
+                self.loadedRowPages.insert(page)
+                self.markRowPageAccess(page)
+                self.promoteSelectedRowIfLoaded(in: range)
+                self.evictRowPagesIfNeeded()
+                self.rowCacheVersion += 1
+                self.lastUpdatedAt = Date()
             } catch {
-                await MainActor.run {
-                    guard let self, self.queryGeneration == generation else {
-                        return
-                    }
-                    self.inFlightRowPages.remove(page)
-                    self.rowLoadTasks[page] = nil
-                    self.reportError(error)
+                guard let self, self.queryGeneration == generation else {
+                    return
                 }
+                self.inFlightRowPages.remove(page)
+                self.rowLoadTasks[page] = nil
+                self.reportError(error)
             }
         }
     }

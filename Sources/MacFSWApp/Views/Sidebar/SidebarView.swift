@@ -99,13 +99,13 @@ struct ProcessFilterPane: View {
     @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
-        @Bindable var model = model
+        @Bindable var processSidebar = model.processSidebar
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     SidebarSectionHeader("Processes")
                     Spacer()
-                    Text("\(model.filteredProcessSummaries.count)")
+                    Text("\(model.processSidebar.filteredProcessSummaries.count)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -118,15 +118,15 @@ struct ProcessFilterPane: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
 
-            TextField("Filter process or signing", text: $model.processSearchText)
+            TextField("Filter process or signing", text: $processSidebar.processSearchText)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal, 12)
 
-            Toggle(isOn: $model.includeExitedProcesses) {
+            Toggle(isOn: $processSidebar.includeExitedProcesses) {
                 HStack(spacing: 6) {
                     Text("Include Exited")
-                    if model.filteredExitedProcessCount > 0 {
-                        Text("\(model.filteredExitedProcessCount)")
+                    if model.processSidebar.filteredExitedProcessCount > 0 {
+                        Text("\(model.processSidebar.filteredExitedProcessCount)")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -136,7 +136,7 @@ struct ProcessFilterPane: View {
             .font(.caption)
             .padding(.horizontal, 12)
 
-            if model.selectedPage == .monitor, model.selectedProcessID != nil {
+            if model.selectedPage == .monitor, model.monitor.selectedProcessID != nil {
                 Button {
                     model.clearProcessFilter()
                 } label: {
@@ -146,7 +146,7 @@ struct ProcessFilterPane: View {
                 .padding(.horizontal, 12)
             }
 
-            if model.filteredProcessGroups.isEmpty {
+            if model.processSidebar.filteredProcessGroups.isEmpty {
                 Text("No process events")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -157,19 +157,19 @@ struct ProcessFilterPane: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(model.filteredProcessGroups) { group in
+                        ForEach(model.processSidebar.filteredProcessGroups) { group in
                             if group.instanceCount > 1 {
                                 Button {
-                                    model.toggleProcessGroup(group.id)
+                                    model.processSidebar.toggleProcessGroup(group.id)
                                 } label: {
                                     ProcessGroupRow(
                                         group: group,
-                                        isExpanded: model.expandedProcessGroupIDs.contains(group.id)
+                                        isExpanded: model.processSidebar.expandedProcessGroupIDs.contains(group.id)
                                     )
                                 }
                                 .buttonStyle(.plain)
 
-                                if model.expandedProcessGroupIDs.contains(group.id) {
+                                if model.processSidebar.expandedProcessGroupIDs.contains(group.id) {
                                     ForEach(group.summaries) { summary in
                                         Button {
                                             model.selectSidebarProcess(summary)
@@ -213,9 +213,9 @@ struct ProcessFilterPane: View {
     private func isSelected(_ summary: MacFSWProcessSummary) -> Bool {
         switch model.selectedPage {
         case .monitor:
-            model.selectedProcessID == summary.id
+            model.monitor.selectedProcessID == summary.id
         case .analysis:
-            model.selectedAnalysisProcessID == summary.id
+            model.analysis.selectedProcessID == summary.id
         }
     }
 }

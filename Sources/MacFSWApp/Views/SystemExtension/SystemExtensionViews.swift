@@ -7,8 +7,8 @@ struct SystemExtensionSettingsPane: View {
     var body: some View {
         Form {
             Section("Status") {
-                LabeledContent("State", value: model.extensionInstallState.title)
-                Text(model.extensionInstallMessage)
+                LabeledContent("State", value: model.extensionStatus.installState.title)
+                Text(model.extensionStatus.installMessage)
                     .foregroundStyle(.secondary)
             }
 
@@ -27,13 +27,13 @@ struct SystemExtensionSettingsPane: View {
                     }
 
                     Button {
-                        model.openSystemExtensionSettings()
+                        model.extensionStatus.openLoginItemsSettings()
                     } label: {
                         Label("Login Items & Extensions", systemImage: "gear")
                     }
 
                     Button {
-                        model.openFullDiskAccessSettings()
+                        model.extensionStatus.openFullDiskAccessSettings()
                     } label: {
                         Label("Open Full Disk Access", systemImage: "lock.shield")
                     }
@@ -64,26 +64,26 @@ struct SystemExtensionStatusView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: model.extensionInstallState.symbolName)
+                Image(systemName: model.extensionStatus.installState.symbolName)
                     .foregroundStyle(statusColor)
                     .frame(width: 16)
-                Text(model.extensionInstallState.title)
+                Text(model.extensionStatus.installState.title)
                     .font(.callout.weight(.medium))
                 Spacer()
-                if model.extensionInstallState == .activating || model.extensionInstallState == .unknown {
+                if model.extensionStatus.installState == .activating || model.extensionStatus.installState == .unknown {
                     ProgressView()
                         .controlSize(.small)
                 }
             }
 
-            Text(model.extensionInstallMessage)
+            Text(model.extensionStatus.installMessage)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(5)
 
-            switch model.extensionInstallState {
+            switch model.extensionStatus.installState {
             case .ready:
-                if model.captureHealth.fullDiskAccessHint {
+                if model.session.captureHealth.fullDiskAccessHint {
                     fullDiskAccessActions
                 } else {
                     EmptyView()
@@ -91,7 +91,7 @@ struct SystemExtensionStatusView: View {
             case .needsApproval:
                 VStack(alignment: .leading, spacing: 6) {
                     Button {
-                        model.openSystemExtensionSettings()
+                        model.extensionStatus.openLoginItemsSettings()
                     } label: {
                         Label("Login Items & Extensions", systemImage: "gear")
                     }
@@ -104,7 +104,7 @@ struct SystemExtensionStatusView: View {
                 }
                 .buttonStyle(.borderless)
             case .notReady, .failed, .unknown:
-                if model.captureHealth.fullDiskAccessHint {
+                if model.session.captureHealth.fullDiskAccessHint {
                     fullDiskAccessActions
                 } else {
                     Button {
@@ -116,7 +116,7 @@ struct SystemExtensionStatusView: View {
                 }
             case .activating:
                 Button {
-                    model.openSystemExtensionSettings()
+                    model.extensionStatus.openLoginItemsSettings()
                 } label: {
                     Label("Login Items & Extensions", systemImage: "gear")
                 }
@@ -127,7 +127,7 @@ struct SystemExtensionStatusView: View {
     }
 
     private var statusColor: Color {
-        switch model.extensionInstallState {
+        switch model.extensionStatus.installState {
         case .ready:
             .green
         case .failed:
@@ -144,7 +144,7 @@ struct SystemExtensionStatusView: View {
     private var fullDiskAccessActions: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                model.openFullDiskAccessSettings()
+                model.extensionStatus.openFullDiskAccessSettings()
             } label: {
                 Label("Open Full Disk Access", systemImage: "lock.shield")
             }

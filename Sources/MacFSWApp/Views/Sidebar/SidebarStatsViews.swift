@@ -42,14 +42,14 @@ struct CaptureSidebarStatusView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                RecordingIndicatorView(isRecording: model.captureState == .recording)
+                RecordingIndicatorView(isRecording: model.session.captureState == .recording)
                 Text(model.statusText)
                     .font(.callout.weight(.medium))
                 Spacer()
-                if model.captureState == .recording {
-                    Label(model.followMode.title, systemImage: model.followMode.symbolName)
+                if model.session.captureState == .recording {
+                    Label(model.monitor.followMode.title, systemImage: model.monitor.followMode.symbolName)
                         .font(.caption)
-                        .foregroundStyle(model.followMode == .live ? .green : .secondary)
+                        .foregroundStyle(model.monitor.followMode == .live ? .green : .secondary)
                 }
             }
 
@@ -76,7 +76,7 @@ struct OperationStatsPane: View {
     ]
 
     private var summaryByBucket: [MacFSWOperationBucket: MacFSWOperationSummary] {
-        Dictionary(uniqueKeysWithValues: model.operationSummaries.map { ($0.bucket, $0) })
+        Dictionary(uniqueKeysWithValues: model.monitor.operationSummaries.map { ($0.bucket, $0) })
     }
 
     private var rankedSummaries: [MacFSWOperationSummary] {

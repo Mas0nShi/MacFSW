@@ -2,9 +2,21 @@ import Foundation
 import Observation
 import MacFSWCore
 
+/// The event table, command bar, and inspector selection for the current
+/// session: query parsing and suggestions, the paged row window over the
+/// event store, and live-tail rendering of newly captured events.
 @MainActor
 @Observable
 final class MonitorStore {
+    @ObservationIgnored
+    var eventStore: MacFSWSQLiteEventStore
+    @ObservationIgnored
+    let processSidebar: ProcessSidebarStore
+    @ObservationIgnored
+    let queryHistory: QueryHistoryStore
+    @ObservationIgnored
+    var onError: (any Error) -> Void = { _ in }
+
     var visibleEventCount = 0
     var rowCacheVersion = 0
     var rowCacheResetSerial = 0
@@ -99,4 +111,101 @@ final class MonitorStore {
     var queryGeneration = 0
     @ObservationIgnored
     var liveRenderGeneration = 0
+
+    init(eventStore: MacFSWSQLiteEventStore, processSidebar: ProcessSidebarStore, queryHistory: QueryHistoryStore) {
+        self.eventStore = eventStore
+        self.processSidebar = processSidebar
+        self.queryHistory = queryHistory
+    }
+
+    var shouldShowInspector: Bool {
+        selectedEventID != nil || selectedEvent != nil || selectedEventIsLoading
+    }
+
+    func reportError(_ error: any Error) {
+        onError(error)
+    }
+
+    /// Points the monitor at a different event store (new or opened session)
+    /// and drops every piece of state derived from the previous one.
+    func reset(eventStore newStore: MacFSWSQLiteEventStore, followMode newFollowMode: MacFSWFollowMode) {
+        cancelAllWork()
+        eventStore = newStore
+        queryText = ""
+        activeQuery = MacFSWEventQuery()
+        selectedProcessID = nil
+        resetDerivedState(followMode: newFollowMode)
+    }
+
+    /// Clears what was derived from the store's events while keeping the
+    /// current query, for when the store itself was emptied.
+    func resetAfterClear() {
+        cancelAllWork()
+        activeQuery = MacFSWQueryParser.parse(queryText)
+        selectedProcessID = nil
+        resetDerivedState(followMode: .live)
+    }
+
+    func cancelAllWork() {
+        renderTask?.cancel()
+        renderTask = nil
+        refreshTask?.cancel()
+        refreshTask = nil
+        filterTask?.cancel()
+        filterTask = nil
+        cancelSelectedEventLoad()
+        cancelSnapshotCleanup()
+        cancelRowLoads()
+    }
+
+    private func resetDerivedState(followMode newFollowMode: MacFSWFollowMode) {
+        visibleEventCount = 0
+        totalMatchingEventCount = 0
+        resetRowCache(resetTable: true)
+        selectedEventID = nil
+        selectedRow = nil
+        selectedEvent = nil
+        selectedEventIsLoading = false
+        isApplyingFilter = false
+        activeSnapshot = nil
+        operationSummaries = []
+        followMode = newFollowMode
+        unseenEventCount = 0
+        isViewingLiveEdge = true
+        scrollToLiveSerial += 1
+        selectionResetSerial += 1
+        lastUpdatedAt = Date()
+    }
+
+    func scheduleQueryRefresh() {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else {
+                return
+            }
+            await self?.refreshFilteredEvents()
+        }
+    }
+
+    func refreshFilteredEvents(allowAutoSelection: Bool = false) async {
+        await refreshFilteredEvents(using: nil, allowAutoSelection: allowAutoSelection)
+    }
+
+    func applyOperationSummaryDelta(from rows: [MacFSWEventRowSummary]) {
+        operationSummaries = OperationSummaryReducer.applying(rows: rows, to: operationSummaries)
+    }
+
+    func prepareForLiveCapture() {
+        followMode = .live
+        unseenEventCount = 0
+        isViewingLiveEdge = true
+        scrollToLiveSerial += 1
+    }
+
+    func captureStopped() {
+        followMode = .paused
+        unseenEventCount = 0
+        isViewingLiveEdge = true
+    }
 }

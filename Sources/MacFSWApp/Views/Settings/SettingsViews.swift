@@ -96,17 +96,17 @@ struct GeneralSettingsPane: View {
     @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
-        @Bindable var model = model
+        @Bindable var preferences = model.preferences
         Form {
             Section("Startup") {
-                Picker("Default Page", selection: $model.defaultStartupPage) {
+                Picker("Default Page", selection: $preferences.defaultStartupPage) {
                     ForEach(MacFSWNavigationPage.allCases) { page in
                         Text(page.title).tag(page)
                     }
                 }
             }
             Section("Processes") {
-                Toggle("Show exited processes by default", isOn: $model.defaultIncludeExitedProcesses)
+                Toggle("Show exited processes by default", isOn: $preferences.defaultIncludeExitedProcesses)
                     .toggleStyle(.checkbox)
             }
         }
@@ -119,47 +119,47 @@ struct LogsSettingsPane: View {
     @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
-        @Bindable var model = model
+        @Bindable var log = model.log
         Form {
             Section("Diagnostics") {
-                Toggle("Write diagnostic logs", isOn: $model.diagnosticLoggingEnabled)
+                Toggle("Write diagnostic logs", isOn: $log.isEnabled)
                     .toggleStyle(.checkbox)
 
-                Picker("Minimum Level", selection: $model.diagnosticLogLevel) {
+                Picker("Minimum Level", selection: $log.minimumLevel) {
                     ForEach(MacFSWAppLogLevel.allCases) { level in
                         Text(level.title).tag(level)
                     }
                 }
-                .disabled(!model.diagnosticLoggingEnabled)
+                .disabled(!model.log.isEnabled)
             }
 
             Section("Location") {
-                Text(model.diagnosticLogFilePath)
+                Text(model.log.logFileURL.path)
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
 
                 HStack {
                     Button {
-                        model.openLogsFolder()
+                        model.log.openLogsFolder()
                     } label: {
                         Label("Open Logs Folder", systemImage: "folder")
                     }
 
                     Button {
-                        model.copyLogFilePath()
+                        model.log.copyLogFilePath()
                     } label: {
                         Label("Copy Path", systemImage: "doc.on.doc")
                     }
 
                     Button(role: .destructive) {
-                        model.clearDiagnosticLog()
+                        model.log.clearLog()
                     } label: {
                         Label("Clear Log", systemImage: "trash")
                     }
                 }
             }
 
-            if let error = model.diagnosticLogWriteError {
+            if let error = model.log.lastWriteError {
                 Section("Write Error") {
                     Text(error)
                         .foregroundStyle(.orange)
@@ -176,80 +176,51 @@ struct AnalysisSettingsPane: View {
     @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
+        @Bindable var preferences = model.preferences
         Form {
             Section("Provider") {
-                Picker("Endpoint", selection: Binding(
-                    get: { model.llmSettings.endpoint },
-                    set: { model.llmSettings.endpoint = $0 }
-                )) {
+                Picker("Endpoint", selection: $preferences.llmSettings.endpoint) {
                     ForEach(MacFSWLLMEndpoint.allCases) { endpoint in
                         Text(endpoint.title).tag(endpoint)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                TextField("Base URL", text: Binding(
-                    get: { model.llmSettings.baseURL },
-                    set: { model.llmSettings.baseURL = $0 }
-                ))
+                TextField("Base URL", text: $preferences.llmSettings.baseURL)
 
-                SecureField("API Key", text: Binding(
-                    get: { model.llmSettings.apiKey },
-                    set: { model.llmSettings.apiKey = $0 }
-                ))
+                SecureField("API Key", text: $preferences.llmSettings.apiKey)
 
-                TextField("Model", text: Binding(
-                    get: { model.llmSettings.model },
-                    set: { model.llmSettings.model = $0 }
-                ))
+                TextField("Model", text: $preferences.llmSettings.model)
 
-                Toggle("Stream response", isOn: Binding(
-                    get: { model.llmSettings.streamResponses },
-                    set: { model.llmSettings.streamResponses = $0 }
-                ))
-                .toggleStyle(.checkbox)
+                Toggle("Stream response", isOn: $preferences.llmSettings.streamResponses)
+                    .toggleStyle(.checkbox)
             }
 
             Section("Limits") {
-                Stepper(value: Binding(
-                    get: { model.llmSettings.maxEvents },
-                    set: { model.llmSettings.maxEvents = $0 }
-                ), in: 1...20_000, step: 50) {
-                    LabeledContent("Max Events", value: "\(model.llmSettings.maxEvents)")
+                Stepper(value: $preferences.llmSettings.maxEvents, in: 1...20_000, step: 50) {
+                    LabeledContent("Max Events", value: "\(model.preferences.llmSettings.maxEvents)")
                 }
 
-                Stepper(value: Binding(
-                    get: { model.llmSettings.tokenBudget },
-                    set: { model.llmSettings.tokenBudget = $0 }
-                ), in: 256...200_000, step: 1_000) {
-                    LabeledContent("Token Budget", value: "\(model.llmSettings.tokenBudget)")
+                Stepper(value: $preferences.llmSettings.tokenBudget, in: 256...200_000, step: 1_000) {
+                    LabeledContent("Token Budget", value: "\(model.preferences.llmSettings.tokenBudget)")
                 }
 
-                Stepper(value: Binding(
-                    get: { model.llmSettings.timeoutSeconds },
-                    set: { model.llmSettings.timeoutSeconds = $0 }
-                ), in: 5...600, step: 5) {
-                    LabeledContent("Timeout", value: "\(model.llmSettings.timeoutSeconds)s")
+                Stepper(value: $preferences.llmSettings.timeoutSeconds, in: 5...600, step: 5) {
+                    LabeledContent("Timeout", value: "\(model.preferences.llmSettings.timeoutSeconds)s")
                 }
             }
 
             Section("Prompt") {
-                Picker("Output Language", selection: Binding(
-                    get: { model.llmSettings.outputLanguage },
-                    set: { model.llmSettings.outputLanguage = $0 }
-                )) {
+                Picker("Output Language", selection: $preferences.llmSettings.outputLanguage) {
                     ForEach(MacFSWAnalysisOutputLanguage.allCases) { language in
                         Text(language.pickerTitle).tag(language)
                     }
                 }
 
-                Stepper(value: Binding(
-                    get: { model.llmSettings.promptEventCharacterBudget },
-                    set: { model.llmSettings.promptEventCharacterBudget = $0 }
-                ), in: 10_000...1_000_000, step: 10_000) {
+                Stepper(value: $preferences.llmSettings.promptEventCharacterBudget, in: 10_000...1_000_000, step: 10_000) {
                     LabeledContent(
                         "Event Sample Budget",
-                        value: "\(model.llmSettings.promptEventCharacterBudget.formatted()) chars ≈ \(MacFSWTokenEstimator.estimatedTokens(forCharacters: model.llmSettings.promptEventCharacterBudget).formatted()) tokens"
+                        value: "\(model.preferences.llmSettings.promptEventCharacterBudget.formatted()) chars ≈ \(MacFSWTokenEstimator.estimatedTokens(forCharacters: model.preferences.llmSettings.promptEventCharacterBudget).formatted()) tokens"
                     )
                 }
 
@@ -264,19 +235,19 @@ struct AnalysisSettingsPane: View {
                         } label: {
                             Label("Test Connection", systemImage: "network")
                         }
-                        .disabled(model.isTestingLLMConnection)
+                        .disabled(model.analysis.isTestingConnection)
 
-                        if model.isTestingLLMConnection {
+                        if model.analysis.isTestingConnection {
                             ProgressView()
                                 .controlSize(.small)
                         }
 
                         Spacer(minLength: 12)
 
-                        MacFSWConnectionStatusBadge(state: model.llmConnectionTestState)
+                        MacFSWConnectionStatusBadge(state: model.analysis.connectionTestState)
                     }
 
-                    if case .failed(let error) = model.llmConnectionTestState {
+                    if case .failed(let error) = model.analysis.connectionTestState {
                         MacFSWConnectionErrorCallout(error: error)
                     }
                 }
@@ -288,6 +259,10 @@ struct AnalysisSettingsPane: View {
         }
         .formStyle(.grouped)
         .padding(18)
+        .onChange(of: model.preferences.llmSettings) {
+            // A finished connection test no longer describes edited settings.
+            model.analysis.resetConnectionStateIfIdle()
+        }
     }
 }
 
@@ -301,33 +276,33 @@ struct AnalysisTemplateList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(model.analysisTemplates) { template in
+            ForEach(model.analysisTemplates.allTemplates) { template in
                 AnalysisTemplateRow(
                     template: template,
-                    isSelected: template.id == model.selectedAnalysisTemplateID,
-                    onSelect: { model.selectedAnalysisTemplateID = template.id },
+                    isSelected: template.id == model.analysisTemplates.selectedTemplateID,
+                    onSelect: { model.analysisTemplates.selectedTemplateID = template.id },
                     onEdit: {
                         if template.isBuiltIn {
-                            let copy = model.analysisTemplateStore.duplicate(template)
-                            model.selectedAnalysisTemplateID = copy.id
+                            let copy = model.analysisTemplates.duplicate(template)
+                            model.analysisTemplates.selectedTemplateID = copy.id
                             editing = copy
                         } else {
                             editing = template
                         }
                     },
                     onDuplicate: {
-                        let copy = model.analysisTemplateStore.duplicate(template)
-                        model.selectedAnalysisTemplateID = copy.id
+                        let copy = model.analysisTemplates.duplicate(template)
+                        model.analysisTemplates.selectedTemplateID = copy.id
                     },
                     onDelete: {
-                        model.analysisTemplateStore.delete(id: template.id)
+                        model.analysisTemplates.delete(id: template.id)
                     }
                 )
             }
         }
         .sheet(item: $editing) { template in
             PromptTemplateEditorSheet(template: template) { updated in
-                model.analysisTemplateStore.update(updated)
+                model.analysisTemplates.update(updated)
             }
         }
     }
@@ -509,64 +484,76 @@ private struct PromptPlaceholderReference: View {
 struct CaptureSettingsPane: View {
     @Environment(MacFSWAppCoordinator.self) private var model
 
+    private func config<Value>(_ keyPath: WritableKeyPath<MacFSWCaptureConfig, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.session.research.captureConfig[keyPath: keyPath] },
+            set: { value in model.updateCaptureConfig { $0[keyPath: keyPath] = value } }
+        )
+    }
+
+    /// One entry per line; blank lines and surrounding whitespace dropped.
+    private func lines(_ keyPath: WritableKeyPath<MacFSWCaptureConfig, [String]>) -> Binding<String> {
+        Binding(
+            get: { model.session.research.captureConfig[keyPath: keyPath].joined(separator: "\n") },
+            set: { text in
+                model.updateCaptureConfig {
+                    $0[keyPath: keyPath] = text
+                        .split(whereSeparator: \.isNewline)
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                }
+            }
+        )
+    }
+
     var body: some View {
         Form {
             Group {
                 Section("Capture Profile") {
                     Picker("Profile", selection: Binding(
-                        get: { model.session.captureConfig.profile },
-                        set: { model.updateCaptureProfile($0) }
+                        get: { model.session.research.captureConfig.profile },
+                        set: { profile in
+                            model.updateCaptureConfig { config in
+                                config.profile = profile
+                                config.eventTypes = MacFSWCaptureConfig.defaultEventTypes(for: profile)
+                            }
+                        }
                     )) {
                         ForEach(MacFSWCaptureProfile.allCases) { profile in
                             Text(profile.settingsTitle).tag(profile)
                         }
                     }
 
-                    Stepper(value: Binding(
-                        get: { model.session.captureConfig.maxCaptureDurationSeconds },
-                        set: { model.updateCaptureDuration($0) }
-                    ), in: 5...86_400, step: 60) {
-                        LabeledContent("Duration", value: "\(model.session.captureConfig.maxCaptureDurationSeconds)s")
+                    Stepper(value: config(\.maxCaptureDurationSeconds), in: 5...86_400, step: 60) {
+                        LabeledContent("Duration", value: "\(model.session.research.captureConfig.maxCaptureDurationSeconds)s")
                     }
                 }
 
                 Section("Batching") {
-                    Stepper(value: Binding(
-                        get: { model.session.captureConfig.batchSize },
-                        set: { model.updateCaptureBatchSize($0) }
-                    ), in: 1...10_000, step: 64) {
-                        LabeledContent("Batch Size", value: "\(model.session.captureConfig.batchSize)")
+                    Stepper(value: config(\.batchSize), in: 1...10_000, step: 64) {
+                        LabeledContent("Batch Size", value: "\(model.session.research.captureConfig.batchSize)")
                     }
 
-                    Stepper(value: Binding(
-                        get: { model.session.captureConfig.batchIntervalMS },
-                        set: { model.updateCaptureBatchInterval($0) }
-                    ), in: 10...5_000, step: 10) {
-                        LabeledContent("Batch Interval", value: "\(model.session.captureConfig.batchIntervalMS)ms")
+                    Stepper(value: config(\.batchIntervalMS), in: 10...5_000, step: 10) {
+                        LabeledContent("Batch Interval", value: "\(model.session.research.captureConfig.batchIntervalMS)ms")
                     }
                 }
 
                 Section("Excluded Processes") {
-                    TextEditor(text: Binding(
-                        get: { model.session.captureConfig.excludedProcessNames.joined(separator: "\n") },
-                        set: { model.updateExcludedProcesses($0) }
-                    ))
+                    TextEditor(text: lines(\.excludedProcessNames))
                     .font(.system(.caption, design: .monospaced))
                     .frame(minHeight: 72)
                 }
 
                 Section("Excluded Paths") {
-                    TextEditor(text: Binding(
-                        get: { model.session.captureConfig.excludePaths.joined(separator: "\n") },
-                        set: { model.updateExcludePaths($0) }
-                    ))
+                    TextEditor(text: lines(\.excludePaths))
                     .font(.system(.caption, design: .monospaced))
                     .frame(minHeight: 72)
                 }
             }
-            .disabled(model.captureSettingsLocked)
+            .disabled(model.session.isCaptureActive)
 
-            if model.captureSettingsLocked {
+            if model.session.isCaptureActive {
                 Section("Locked") {
                     Text("Capture settings are locked while recording or connecting.")
                         .foregroundStyle(.secondary)

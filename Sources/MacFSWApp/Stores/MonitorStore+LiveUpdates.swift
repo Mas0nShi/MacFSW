@@ -1,11 +1,7 @@
-import AppKit
-import Darwin
-import MacFSWAnalysis
+import Foundation
 import MacFSWCore
-import SwiftUI
-import UniformTypeIdentifiers
 
-extension MacFSWAppCoordinator {
+extension MonitorStore {
     func jumpToLive() {
         invalidateLiveRender()
         let visibleMutationCount = pendingVisibleMatchCount
@@ -41,90 +37,16 @@ extension MacFSWAppCoordinator {
         }
     }
 
-    func setFrozen(_ isFrozen: Bool) {
-        if isFrozen {
-            followMode = .frozen
-        } else {
-            jumpToLive()
+    /// Folds newly captured events into the live view: counts the ones the
+    /// active query shows and schedules a throttled render.
+    func ingest(_ events: [MacFSWFileEvent]) {
+        let visibleEvents = events.filter { activeQuery.matches($0) }
+        pendingVisibleMatchCount += visibleEvents.count
+        pendingVisibleRowSummaries.append(contentsOf: visibleEvents.map(MacFSWEventRowSummary.init(event:)))
+        if followMode != .live {
+            unseenEventCount += visibleEvents.count
         }
-    }
-
-    func saveSession() {
-        let panel = environment.makeSavePanel()
-        panel.allowedContentTypes = [.init(filenameExtension: MacFSWSessionArchive.nativeExtension)!]
-        panel.nameFieldStringValue = "\(session.name).\(MacFSWSessionArchive.nativeExtension)"
-        guard panel.runModal() == .OK, let url = panel.url else {
-            return
-        }
-
-        Task {
-            do {
-                try await MacFSWSessionArchive.saveSession(session, from: eventStore, to: url)
-            } catch {
-                await MainActor.run {
-                    reportError(error)
-                }
-            }
-        }
-    }
-
-    func openSession() {
-        stopCapture()
-        let panel = environment.makeOpenPanel()
-        panel.allowedContentTypes = [.init(filenameExtension: MacFSWSessionArchive.nativeExtension)!]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else {
-            return
-        }
-
-        Task {
-            do {
-                let openedStore = try MacFSWSessionArchive.openSessionStore(from: url)
-                let opened = try await openedStore.sessionMetadata()
-                let stats = try await openedStore.stats()
-                let oldStore = await MainActor.run { () -> MacFSWSQLiteEventStore in
-                    let oldStore = sessionStore.replace(session: opened, eventStore: openedStore)
-                    queryText = ""
-                    captureStats = stats
-                    resetVisibleStateForLoadedStore()
-                    return oldStore
-                }
-                await cleanupStoreIfOwned(oldStore)
-                await refreshProcessSummariesFromStore()
-                await refreshFilteredEvents(allowAutoSelection: true)
-            } catch {
-                await MainActor.run {
-                    reportError(error)
-                }
-            }
-        }
-    }
-
-    func ingest(_ batch: MacFSWEventBatch) async {
-        do {
-            let result = try await eventStore.appendReturningEvents(batch.events)
-            updateProcessSummaries(with: result.events)
-            var stats = batch.stats
-            stats.deliveredEvents = result.stats.deliveredEvents
-            pendingCaptureStats = stats
-            let visibleEvents = result.events.filter { activeQuery.matches($0) }
-            pendingVisibleMatchCount += visibleEvents.count
-            pendingVisibleRowSummaries.append(contentsOf: visibleEvents.map(MacFSWEventRowSummary.init(event:)))
-
-            if followMode != .live {
-                unseenEventCount += visibleEvents.count
-            }
-            scheduleRenderRefresh()
-        } catch {
-            reportError(
-                error,
-                category: "Capture",
-                metadata: [
-                    "batchEvents": "\(batch.events.count)",
-                    "deliveredEvents": "\(batch.stats.deliveredEvents)",
-                ]
-            )
-        }
+        scheduleRenderRefresh()
     }
 
     func scheduleRenderRefresh(immediate: Bool = false) {
@@ -150,15 +72,9 @@ extension MacFSWAppCoordinator {
     func applyScheduledRender() async {
         defer {
             renderTask = nil
-            if !Task.isCancelled,
-               pendingCaptureStats != nil || (followMode == .live && pendingVisibleMatchCount > 0) {
+            if !Task.isCancelled, followMode == .live, pendingVisibleMatchCount > 0 {
                 scheduleRenderRefresh(immediate: true)
             }
-        }
-
-        if let pendingCaptureStats {
-            captureStats = pendingCaptureStats
-            self.pendingCaptureStats = nil
         }
 
         guard !isApplyingFilter else {

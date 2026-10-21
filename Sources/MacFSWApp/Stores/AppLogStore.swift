@@ -117,9 +117,7 @@ final class AppLogStore {
             do {
                 try await writer.append(entry, to: fileURL)
             } catch {
-                await MainActor.run {
-                    self.lastWriteError = error.userFacingMessage
-                }
+                self.lastWriteError = error.userFacingMessage
             }
         }
     }
@@ -146,13 +144,9 @@ final class AppLogStore {
         Task { [writer] in
             do {
                 try await writer.clear(fileURL)
-                await MainActor.run {
-                    self.lastWriteError = nil
-                }
+                self.lastWriteError = nil
             } catch {
-                await MainActor.run {
-                    self.lastWriteError = error.userFacingMessage
-                }
+                self.lastWriteError = error.userFacingMessage
             }
         }
     }

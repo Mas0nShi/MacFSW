@@ -4,37 +4,37 @@ struct MonitorView: View {
     @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
-        @Bindable var model = model
+        @Bindable var monitor = model.monitor
         VStack(spacing: 0) {
             MonitorCommandBar()
                 .zIndex(1)
             EventTableView(
-                rowCount: model.visibleEventCount,
-                cacheVersion: model.rowCacheVersion,
-                cacheResetSerial: model.rowCacheResetSerial,
-                resetSerial: model.tableResetSerial,
-                selectedEventID: $model.selectedEventID,
-                selectedRow: model.selectedRow,
-                followMode: model.followMode,
-                scrollToLiveSerial: model.scrollToLiveSerial,
-                selectionResetSerial: model.selectionResetSerial,
+                rowCount: model.monitor.visibleEventCount,
+                cacheVersion: model.monitor.rowCacheVersion,
+                cacheResetSerial: model.monitor.rowCacheResetSerial,
+                resetSerial: model.monitor.tableResetSerial,
+                selectedEventID: $monitor.selectedEventID,
+                selectedRow: model.monitor.selectedRow,
+                followMode: model.monitor.followMode,
+                scrollToLiveSerial: model.monitor.scrollToLiveSerial,
+                selectionResetSerial: model.monitor.selectionResetSerial,
                 rowProvider: { row in
-                    model.cachedRow(at: row)
+                    model.monitor.cachedRow(at: row)
                 },
                 requestRows: { range in
-                    model.requestRows(range)
+                    model.monitor.requestRows(range)
                 },
                 onUserWillSelect: { row in
-                    model.prepareEventSelection(row: row)
+                    model.monitor.prepareEventSelection(row: row)
                 },
                 onUserSelected: { row, eventID in
-                    model.selectEvent(eventID, row: row)
+                    model.monitor.selectEvent(eventID, row: row)
                 },
                 onClearSelection: {
-                    model.clearEventSelection()
+                    model.monitor.clearEventSelection()
                 },
                 onLiveEdgeChanged: { isAtLiveEdge in
-                    model.liveEdgeChanged(isAtLiveEdge)
+                    model.monitor.liveEdgeChanged(isAtLiveEdge)
                 }
             )
             StatusBar()
@@ -46,59 +46,59 @@ struct MonitorCommandBar: View {
     @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
-        @Bindable var model = model
+        @Bindable var monitor = model.monitor
         HStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
 
                 CommandBarTextField(
-                    text: $model.queryText,
+                    text: $monitor.queryText,
                     placeholder: "(op:rename OR op:unlink) path:/Library NOT platform:true",
-                    isSuggestionListVisible: model.isQuerySuggestionListVisible,
+                    isSuggestionListVisible: model.monitor.isQuerySuggestionListVisible,
                     onEditingChanged: {
-                        model.queryTextEdited()
-                        model.scheduleQueryRefresh()
+                        model.monitor.queryTextEdited()
+                        model.monitor.scheduleQueryRefresh()
                     },
                     onSubmit: {
-                        model.submitQuery()
+                        model.monitor.submitQuery()
                     },
                     onMoveHighlight: { delta in
-                        model.moveSuggestionHighlight(by: delta)
+                        model.monitor.moveSuggestionHighlight(by: delta)
                     },
                     onCycleHighlight: { delta in
-                        model.cycleSuggestionHighlight(by: delta)
+                        model.monitor.cycleSuggestionHighlight(by: delta)
                     },
                     onAcceptSuggestion: {
-                        model.acceptHighlightedSuggestion()
+                        model.monitor.acceptHighlightedSuggestion()
                     },
                     onCancelSuggestions: {
-                        model.cancelQuerySuggestions()
+                        model.monitor.cancelQuerySuggestions()
                     },
                     onDismissSuggestions: {
-                        model.dismissQuerySuggestions()
+                        model.monitor.dismissQuerySuggestions()
                     },
                     highlight: { text in
-                        model.queryHighlightRuns(for: text)
+                        model.monitor.queryHighlightRuns(for: text)
                     },
-                    fillCommitSerial: model.queryFillCommitSerial,
-                    fillCommitBasis: model.queryFillCommitBasis,
-                    previewBasis: model.querySuggestionPreviewBasis
+                    fillCommitSerial: model.monitor.queryFillCommitSerial,
+                    fillCommitBasis: model.monitor.queryFillCommitBasis,
+                    previewBasis: model.monitor.querySuggestionPreviewBasis
                 )
 
-                if let warning = model.queryDiagnosticSummary {
+                if let warning = model.monitor.queryDiagnosticSummary {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .help(warning)
                         .transition(.opacity)
                 }
 
-                if model.isApplyingFilter {
+                if model.monitor.isApplyingFilter {
                     ProgressView()
                         .controlSize(.small)
-                } else if !model.queryText.isEmpty {
+                } else if !model.monitor.queryText.isEmpty {
                     Button {
-                        model.clearQuery()
+                        model.monitor.clearQuery()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
@@ -111,15 +111,15 @@ struct MonitorCommandBar: View {
             .frame(maxWidth: .infinity)
             .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 7))
             .overlay(alignment: .topLeading) {
-                if model.isQuerySuggestionListVisible {
+                if model.monitor.isQuerySuggestionListVisible {
                     QuerySuggestionListView(
-                        suggestions: model.querySuggestions,
-                        highlightedIndex: model.querySuggestionHighlight,
+                        suggestions: model.monitor.querySuggestions,
+                        highlightedIndex: model.monitor.querySuggestionHighlight,
                         onSelect: { suggestion in
-                            model.acceptSuggestion(suggestion)
+                            model.monitor.acceptSuggestion(suggestion)
                         },
                         onHighlight: { index in
-                            model.querySuggestionHighlight = index
+                            model.monitor.querySuggestionHighlight = index
                         }
                     )
                     .frame(maxWidth: 520, alignment: .topLeading)
@@ -127,8 +127,8 @@ struct MonitorCommandBar: View {
                     .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.14), value: model.isQuerySuggestionListVisible)
-            .animation(.easeInOut(duration: 0.14), value: model.queryDiagnosticSummary == nil)
+            .animation(.easeInOut(duration: 0.14), value: model.monitor.isQuerySuggestionListVisible)
+            .animation(.easeInOut(duration: 0.14), value: model.monitor.queryDiagnosticSummary == nil)
 
             Button {
                 model.recordButtonTapped()
@@ -138,7 +138,7 @@ struct MonitorCommandBar: View {
 
             if model.shouldShowJumpToLive {
                 Button {
-                    model.jumpToLive()
+                    model.monitor.jumpToLive()
                 } label: {
                     Label("Jump to Live", systemImage: "arrow.down.to.line")
                 }
@@ -149,7 +149,7 @@ struct MonitorCommandBar: View {
             } label: {
                 Label("Clear", systemImage: "trash")
             }
-            .disabled(model.visibleEventCount == 0 && model.captureStats.deliveredEvents == 0)
+            .disabled(model.monitor.visibleEventCount == 0 && model.session.captureStats.deliveredEvents == 0)
 
         }
         .buttonStyle(.bordered)
@@ -162,22 +162,22 @@ struct MonitorCommandBar: View {
     }
 
     private var recordButtonTitle: String {
-        if model.captureState == .recording {
+        if model.session.captureState == .recording {
             return "Stop"
         }
-        if model.captureHealth.fullDiskAccessHint {
+        if model.session.captureHealth.fullDiskAccessHint {
             return "Open Full Disk Access"
         }
-        return model.extensionInstallState == .ready ? "Record" : "Enable Extension"
+        return model.extensionStatus.installState == .ready ? "Record" : "Enable Extension"
     }
 
     private var recordButtonSymbol: String {
-        if model.captureState == .recording {
+        if model.session.captureState == .recording {
             return "stop.circle.fill"
         }
-        if model.captureHealth.fullDiskAccessHint {
+        if model.session.captureHealth.fullDiskAccessHint {
             return "lock.shield"
         }
-        return model.extensionInstallState == .ready ? "record.circle" : "puzzlepiece.extension"
+        return model.extensionStatus.installState == .ready ? "record.circle" : "puzzlepiece.extension"
     }
 }

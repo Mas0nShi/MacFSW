@@ -22,10 +22,6 @@ struct MacFSWAppEnvironment {
     var extensionInstaller: any SystemExtensionInstalling
     var settingsStore: MacFSWSettingsStore
     var llmClient: MacFSWLLMClient
-    var makeTemporaryEventStore: (MacFSWResearchSession) throws -> MacFSWSQLiteEventStore
-    var cleanupStaleTemporaryStores: () throws -> Void
-    var makeOpenPanel: () -> NSOpenPanel
-    var makeSavePanel: () -> NSSavePanel
 
     static var live: MacFSWAppEnvironment {
         let xpcServiceName = Bundle.main.object(forInfoDictionaryKey: "MacFSWXPCServiceName") as? String
@@ -35,11 +31,7 @@ struct MacFSWAppEnvironment {
             captureClient: MacFSWXPCCaptureClient(serviceName: serviceName),
             extensionInstaller: SystemExtensionInstaller.shared,
             settingsStore: .shared,
-            llmClient: MacFSWLLMClient(),
-            makeTemporaryEventStore: { try MacFSWSQLiteEventStore.temporary(session: $0) },
-            cleanupStaleTemporaryStores: { try MacFSWSQLiteEventStore.cleanupStaleTemporaryStores() },
-            makeOpenPanel: NSOpenPanel.init,
-            makeSavePanel: NSSavePanel.init
+            llmClient: MacFSWLLMClient()
         )
     }
 
