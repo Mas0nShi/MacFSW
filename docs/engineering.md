@@ -128,8 +128,8 @@ A production app bundle should still be archived from an Xcode project with:
 Version metadata has a single source of truth in `Configuration/Signing.xcconfig`:
 
 ```text
-MARKETING_VERSION = 0.1.6
-CURRENT_PROJECT_VERSION = 9
+MARKETING_VERSION = 0.1.8
+CURRENT_PROJECT_VERSION = 14
 ```
 
 Those are the standard Xcode build setting names for `CFBundleShortVersionString` and `CFBundleVersion`. App code must read the installed bundle metadata through `Bundle.main` when it needs the product version, for example when creating session metadata. Core libraries must not hardcode the App version.
@@ -190,7 +190,7 @@ identifier "com.mas0n.MacFSW.cli"                                               
 
 `Scripts/package-dev-app.sh` signs `Contents/MacOS/macfsw` with the CLI identifier and verifies it. Each accepted connection gets its own capture service and Endpoint Security client, so the app and the CLI can record at the same time.
 
-Changing the policy changes the extension binary: after updating it, enable the System Extension again from the app so macOS installs the new version.
+Changing the policy changes the extension binary. macOS replaces an activated System Extension only when its `CFBundleVersion` changes, so bump `CURRENT_PROJECT_VERSION` in `Configuration/Signing.xcconfig`, repackage, and enable the System Extension again from the app. With an unchanged build number the previously activated binary keeps running.
 
 ## Agent Interface (MCP)
 
