@@ -22,6 +22,7 @@ public actor MacFSWCaptureSession {
     private let client: any MacFSWCaptureClient
     private var handle: MacFSWCaptureHandle?
     private var ingestTask: Task<Void, Never>?
+    private var deadlineTask: Task<Void, Never>?
     private var observers: [UUID: AsyncStream<Update>.Continuation] = [:]
 
     private enum Incoming: Sendable {
@@ -72,7 +73,8 @@ public actor MacFSWCaptureSession {
     }
 
     /// Opens the capture stream and returns once the System Extension has
-    /// accepted it. Throws if the stream cannot be opened.
+    /// accepted it. Throws if the stream cannot be opened. Recording stops
+    /// on its own after `config.maxCaptureDurationSeconds`.
     public func start(config: MacFSWCaptureConfig) async throws {
         guard state != .connecting, handle == nil else {
             return
@@ -105,6 +107,14 @@ public actor MacFSWCaptureSession {
         handle = opened
         setState(.recording)
         ingestTask = Task { await self.ingest(incoming) }
+        let duration = Duration.seconds(config.maxCaptureDurationSeconds)
+        deadlineTask = Task {
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled else {
+                return
+            }
+            await self.stop()
+        }
     }
 
     public func stop() {
@@ -112,6 +122,8 @@ public actor MacFSWCaptureSession {
         case .connecting:
             setState(.stopped)
         case .recording:
+            deadlineTask?.cancel()
+            deadlineTask = nil
             handle?.stop()
             handle = nil
             setState(.stopped)
@@ -163,6 +175,8 @@ public actor MacFSWCaptureSession {
     }
 
     private func finishCapture(error: (any Error)?) {
+        deadlineTask?.cancel()
+        deadlineTask = nil
         handle?.stop()
         handle = nil
         ingestTask = nil

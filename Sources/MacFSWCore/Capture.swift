@@ -60,7 +60,7 @@ public struct MacFSWCaptureConfig: Codable, Equatable, Sendable {
         self.batchSize = max(1, batchSize)
         self.batchIntervalMS = max(10, batchIntervalMS)
         self.maxEventsPerSecond = maxEventsPerSecond
-        self.maxCaptureDurationSeconds = max(5, maxCaptureDurationSeconds)
+        self.maxCaptureDurationSeconds = max(1, maxCaptureDurationSeconds)
     }
 
     public static func defaultEventTypes(for profile: MacFSWCaptureProfile) -> [MacFSWEventType] {
