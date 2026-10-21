@@ -352,31 +352,25 @@ public actor MacFSWSQLiteEventStore {
         }
     }
 
+    /// Full events matching `query` in `sortOrder`. A `limit` of 0 returns
+    /// every match; `offset` skips that many matches first.
     public func events(
         matching query: MacFSWEventQuery,
         sortOrder: MacFSWEventSortOrder = .oldestFirst,
-        limit: Int = 0
+        limit: Int = 0,
+        offset: Int = 0
     ) async throws -> [MacFSWFileEvent] {
         let compiled = MacFSWSQLQueryCompiler.compile(query)
         var arguments = compiled.arguments
-        let sql: String
-        if limit > 0 {
-            arguments.append(MacFSWSQLValue(limit))
-            sql = """
-            SELECT *
-            FROM events
-            WHERE \(compiled.whereSQL)
-            ORDER BY \(MacFSWSQLQueryCompiler.orderClause(sortOrder))
-            LIMIT ?
-            """
-        } else {
-            sql = """
-            SELECT *
-            FROM events
-            WHERE \(compiled.whereSQL)
-            ORDER BY \(MacFSWSQLQueryCompiler.orderClause(sortOrder))
-            """
-        }
+        arguments.append(MacFSWSQLValue(limit > 0 ? limit : -1))
+        arguments.append(MacFSWSQLValue(max(0, offset)))
+        let sql = """
+        SELECT *
+        FROM events
+        WHERE \(compiled.whereSQL)
+        ORDER BY \(MacFSWSQLQueryCompiler.orderClause(sortOrder))
+        LIMIT ? OFFSET ?
+        """
         let statementArguments = MacFSWSQLQueryCompiler.arguments(arguments)
 
         return try await dbQueue.read { db in
@@ -442,7 +436,11 @@ public actor MacFSWSQLiteEventStore {
         }
     }
 
-    public func processSummaries() async throws -> [MacFSWProcessEventSummary] {
+    /// One row per process with events matching `query`, most recently
+    /// active first.
+    public func processSummaries(matching query: MacFSWEventQuery = MacFSWEventQuery()) async throws -> [MacFSWProcessEventSummary] {
+        let compiled = MacFSWSQLQueryCompiler.compile(query)
+        let arguments = MacFSWSQLQueryCompiler.arguments(compiled.arguments)
         let sql = """
         SELECT
             'pid:' || CAST(pid AS TEXT) AS id,
@@ -459,12 +457,13 @@ public actor MacFSWSQLiteEventStore {
             MAX(isPlatformBinary) AS isPlatformBinary,
             COUNT(DISTINCT auditToken || '|' || executablePath) AS identityCount
         FROM events
+        WHERE \(compiled.whereSQL)
         GROUP BY pid
         ORDER BY lastEventNS DESC
         """
 
         return try await dbQueue.read { db in
-            let rows = try Row.fetchAll(db, sql: sql)
+            let rows = try Row.fetchAll(db, sql: sql, arguments: arguments)
             return rows.map(processEventSummary(from:))
         }
     }

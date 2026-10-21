@@ -57,6 +57,24 @@ final class CaptureSessionTests: XCTestCase {
         try await session.close()
     }
 
+    func testRecordingStopsAtTheConfiguredDuration() async throws {
+        let client = FakeCaptureClient()
+        let session = try MacFSWCaptureSession.temporary(for: MacFSWResearchSession(), client: client)
+        let updates = await session.updates()
+
+        try await session.start(config: MacFSWCaptureConfig(maxCaptureDurationSeconds: 1))
+        let started = ContinuousClock.now
+        for await update in updates {
+            if case .stateChanged(.stopped, _) = update {
+                break
+            }
+        }
+
+        XCTAssertGreaterThanOrEqual(ContinuousClock.now - started, .milliseconds(900))
+        XCTAssertTrue(client.handleWasStopped)
+        try await session.close()
+    }
+
     func testStreamErrorMovesSessionToFailed() async throws {
         let client = FakeCaptureClient()
         let session = try MacFSWCaptureSession.temporary(for: MacFSWResearchSession(), client: client)
@@ -224,5 +242,24 @@ private final class FakeCaptureClient: MacFSWCaptureClient, @unchecked Sendable 
             self.lock.withLock { self.stopped = true }
             self.finish()
         }
+    }
+}
+
+final class EventStoreAgentQueryTests: XCTestCase {
+    func testProcessSummariesAndEventsHonorQueryAndPaging() async throws {
+        let store = try MacFSWSQLiteEventStore.temporary()
+        let writer = MacFSWProcessIdentity(pid: 1, auditToken: "a", executablePath: "/bin/writer", processName: "writer")
+        let deleter = MacFSWProcessIdentity(pid: 2, auditToken: "b", executablePath: "/bin/deleter", processName: "deleter")
+        _ = try await store.appendReturningEvents(
+            (0..<5).map { MacFSWFileEvent(eventType: .write, process: writer, targetPath: "/tmp/w\($0)") }
+                + [MacFSWFileEvent(eventType: .unlink, process: deleter, targetPath: "/tmp/gone")]
+        )
+
+        let deleters = try await store.processSummaries(matching: MacFSWQueryParser.parse("op:unlink"))
+        XCTAssertEqual(deleters.map(\.processName), ["deleter"])
+
+        let page = try await store.events(matching: MacFSWQueryParser.parse("op:write"), limit: 2, offset: 2)
+        XCTAssertEqual(page.map(\.targetPath), ["/tmp/w2", "/tmp/w3"])
+        try await store.cleanupBackingStore()
     }
 }
