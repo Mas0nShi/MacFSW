@@ -33,11 +33,6 @@ public actor MacFSWCaptureSession {
     private var deadlineTask: Task<Void, Never>?
     private var observers: [UUID: AsyncStream<Update>.Continuation] = [:]
 
-    private enum Incoming: Sendable {
-        case batch(MacFSWEventBatch)
-        case finished((any Error)?)
-    }
-
     public init(store: MacFSWSQLiteEventStore, client: any MacFSWCaptureClient, stats: MacFSWCaptureStats = MacFSWCaptureStats()) {
         self.store = store
         self.client = client
@@ -92,19 +87,19 @@ public actor MacFSWCaptureSession {
         }
         setState(.connecting)
 
-        let (incoming, sink) = AsyncStream<Incoming>.makeStream()
+        let incoming = IncomingQueue()
         let opened: MacFSWCaptureHandle
         do {
-            // XPC delivers both callbacks on one serial queue, so yielding
-            // into a single stream preserves batch order — and the finish
+            // XPC delivers both callbacks on one serial queue, so queueing
+            // them in arrival order preserves batch order — and the finish
             // signal can never overtake the last batch.
             opened = try await client.openCaptureStream(
                 config: config.transportSafe,
-                onBatch: { sink.yield(.batch($0)) },
-                onFinish: { sink.yield(.finished($0)) }
+                onBatch: { incoming.push(.batch($0)) },
+                onFinish: { incoming.push(.finished($0)) }
             )
         } catch {
-            sink.finish()
+            incoming.close()
             setState(.failed, error: error)
             throw error
         }
@@ -112,7 +107,7 @@ public actor MacFSWCaptureSession {
         guard state == .connecting else {
             // `stop()` ran while the stream was still opening.
             opened.stop()
-            sink.finish()
+            incoming.close()
             return
         }
         handle = opened
@@ -185,21 +180,38 @@ public actor MacFSWCaptureSession {
         stats = MacFSWCaptureStats()
     }
 
-    private func ingest(_ incoming: AsyncStream<Incoming>) async {
-        for await item in incoming {
-            switch item {
-            case .batch(let batch):
+    /// Writes whatever has arrived since the last write in one transaction.
+    /// Under light load that is one batch per wake-up; in a burst, batches
+    /// pile up while a write runs and the next write takes them all, so
+    /// commits — the dominant cost — grow with the load instead of with the
+    /// event count.
+    private func ingest(_ incoming: IncomingQueue) async {
+        for await _ in incoming.wakeUps {
+            var events: [MacFSWFileEvent] = []
+            var latestStats: MacFSWCaptureStats?
+            var finish: (any Error)??
+            for item in incoming.takeAll() {
+                switch item {
+                case .batch(let batch):
+                    events += batch.events
+                    latestStats = batch.stats
+                case .finished(let error):
+                    finish = .some(error)
+                }
+            }
+            if !events.isEmpty {
                 do {
-                    let result = try await store.appendReturningEvents(batch.events)
-                    stats = batch.stats
+                    let result = try await store.appendReturningEvents(events)
+                    stats = latestStats ?? stats
                     stats.deliveredEvents = result.stats.deliveredEvents
                     publish(.appended(events: result.events, stats: stats))
                 } catch {
                     finishCapture(error: error)
                     return
                 }
-            case .finished(let error):
-                finishCapture(error: error)
+            }
+            if let finish {
+                finishCapture(error: finish)
                 return
             }
         }
@@ -234,5 +246,40 @@ public actor MacFSWCaptureSession {
 
     private func removeObserver(_ id: UUID) {
         observers[id] = nil
+    }
+}
+
+/// Batches and the finish signal from the capture stream, in arrival
+/// order. Producers never wait; repeated wake-ups collapse into one, so the
+/// consumer takes everything that queued up while it was busy.
+private final class IncomingQueue: @unchecked Sendable {
+    enum Item: Sendable {
+        case batch(MacFSWEventBatch)
+        case finished((any Error)?)
+    }
+
+    let wakeUps: AsyncStream<Void>
+    private let wake: AsyncStream<Void>.Continuation
+    private let lock = NSLock()
+    private var items: [Item] = []
+
+    init() {
+        (wakeUps, wake) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+    }
+
+    func push(_ item: Item) {
+        lock.withLock { items.append(item) }
+        wake.yield()
+    }
+
+    func takeAll() -> [Item] {
+        lock.withLock {
+            defer { items.removeAll(keepingCapacity: true) }
+            return items
+        }
+    }
+
+    func close() {
+        wake.finish()
     }
 }
