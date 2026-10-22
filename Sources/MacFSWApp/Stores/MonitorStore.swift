@@ -33,7 +33,6 @@ final class MonitorStore {
     var selectionResetSerial = 0
     var lastUpdatedAt: Date?
     var operationSummaries: [MacFSWOperationSummary] = []
-    var selectedProcessID: MacFSWProcessSummary.ID?
     var isApplyingFilter = false
     var querySuggestions: [QuerySuggestion] = []
     var querySuggestionHighlight: Int?
@@ -133,7 +132,6 @@ final class MonitorStore {
         eventStore = newStore
         queryText = ""
         activeQuery = MacFSWEventQuery()
-        selectedProcessID = nil
         resetDerivedState(followMode: newFollowMode)
     }
 
@@ -142,7 +140,6 @@ final class MonitorStore {
     func resetAfterClear() {
         cancelAllWork()
         activeQuery = MacFSWQueryParser.parse(queryText)
-        selectedProcessID = nil
         resetDerivedState(followMode: .live)
     }
 
@@ -186,10 +183,6 @@ final class MonitorStore {
             }
             await self?.refreshFilteredEvents()
         }
-    }
-
-    func refreshFilteredEvents(allowAutoSelection: Bool = false) async {
-        await refreshFilteredEvents(using: nil, allowAutoSelection: allowAutoSelection)
     }
 
     func applyOperationSummaryDelta(from rows: [MacFSWEventRowSummary]) {

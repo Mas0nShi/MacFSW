@@ -118,7 +118,7 @@ struct ProcessFilterPane: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
 
-            TextField("Filter process or signing", text: $processSidebar.processSearchText)
+            TextField("Find in process list", text: $processSidebar.processSearchText)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal, 12)
 
@@ -136,9 +136,9 @@ struct ProcessFilterPane: View {
             .font(.caption)
             .padding(.horizontal, 12)
 
-            if model.selectedPage == .monitor, model.monitor.selectedProcessID != nil {
+            if model.selectedPage == .monitor, model.monitor.pinnedPID != nil {
                 Button {
-                    model.clearProcessFilter()
+                    model.monitor.pinProcess(nil)
                 } label: {
                     Label("Clear Process Filter", systemImage: "xmark.circle")
                 }
@@ -213,7 +213,7 @@ struct ProcessFilterPane: View {
     private func isSelected(_ summary: MacFSWProcessSummary) -> Bool {
         switch model.selectedPage {
         case .monitor:
-            model.monitor.selectedProcessID == summary.id
+            model.monitor.pinnedPID == summary.pid
         case .analysis:
             model.analysis.selectedProcessID == summary.id
         }

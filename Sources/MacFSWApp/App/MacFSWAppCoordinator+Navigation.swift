@@ -15,15 +15,7 @@ extension MacFSWAppCoordinator {
 
     func applyProcessFilter(_ summary: MacFSWProcessSummary) {
         selectedPage = .monitor
-        monitor.selectedProcessID = summary.id
-        monitor.clearEventSelection()
-        Task { await monitor.refreshFilteredEvents() }
-    }
-
-    func clearProcessFilter() {
-        monitor.selectedProcessID = nil
-        monitor.clearEventSelection()
-        Task { await monitor.refreshFilteredEvents() }
+        monitor.pinProcess(summary.pid)
     }
 
     func refreshProcessSummaries() async {

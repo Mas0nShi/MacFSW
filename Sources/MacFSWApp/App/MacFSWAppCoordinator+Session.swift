@@ -156,9 +156,6 @@ extension MacFSWAppCoordinator {
 
     func ingest(_ events: [MacFSWFileEvent]) {
         processSidebar.update(with: events)
-        if let id = monitor.selectedProcessID, !processSidebar.contains(id) {
-            monitor.selectedProcessID = nil
-        }
         if let id = analysis.selectedProcessID, !processSidebar.contains(id) {
             analysis.selectedProcessID = nil
         }

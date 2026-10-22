@@ -2,18 +2,8 @@ import Foundation
 import MacFSWCore
 
 extension MonitorStore {
-    func refreshFilteredEvents(
-        using queryOverride: MacFSWEventQuery?,
-        allowAutoSelection: Bool = false
-    ) async {
-        let parsedQuery: MacFSWEventQuery
-        if let queryOverride {
-            parseCurrentQueryText()
-            parsedQuery = queryOverride
-        } else {
-            parsedQuery = parseCurrentQueryText().query
-        }
-        let query = queryWithSelectedProcessFilter(parsedQuery)
+    func refreshFilteredEvents(allowAutoSelection: Bool = false) async {
+        let query = parseCurrentQueryText().query
         filterTask?.cancel()
         let generation = beginFilterRefresh()
         let store = eventStore
@@ -235,19 +225,31 @@ extension MonitorStore {
         retiredSnapshotIDs.removeAll(keepingCapacity: true)
     }
 
-    func processSummary(for id: MacFSWProcessSummary.ID) -> MacFSWProcessSummary? {
-        processSidebar.summary(for: id)
+    /// The process the query pins with a `pid:` term, which the sidebar
+    /// highlights. Derived from the text, so it can never disagree with
+    /// the filter actually applied.
+    var pinnedPID: Int32? {
+        MacFSWQueryEditor.pinnedPID(in: queryText)
     }
 
-    func queryWithSelectedProcessFilter(_ baseQuery: MacFSWEventQuery) -> MacFSWEventQuery {
-        guard let selectedProcessID,
-              let summary = processSummary(for: selectedProcessID) else {
-            return baseQuery
-        }
+    /// Narrows the query to one process by replacing any top-level `pid:`
+    /// term, or clears that pin when `pid` is nil. Undoable like any other
+    /// programmatic edit of the query.
+    func pinProcess(_ pid: Int32?) {
+        let edited = MacFSWQueryEditor.editing(
+            queryText,
+            removing: MacFSWQueryEditor.isPIDTerm,
+            adding: pid.flatMap { MacFSWQueryEditor.term(.pid, String($0)) }.map { [$0] } ?? []
+        )
+        applyEditedQuery(edited)
+    }
 
-        var query = baseQuery
-        query.processIdentity = summary.filterIdentity
-        return query
+    /// Replaces the query text with `edited` as one undo step and applies it.
+    func applyEditedQuery(_ edited: String) {
+        dismissQuerySuggestions()
+        setQueryTextRegisteringUndo(edited)
+        clearEventSelection()
+        Task { await refreshFilteredEvents() }
     }
 
     func pauseLiveView() {

@@ -81,6 +81,24 @@ final class MonitorStoreTests: XCTestCase {
         XCTAssertEqual(monitor.visibleEventCount, 0)
     }
 
+    func testPinningAProcessShowsUpInTheQueryAndFilters() async throws {
+        let other = MacFSWProcessIdentity(pid: 77, auditToken: "o", executablePath: "/bin/other", processName: "other")
+        _ = try await eventStore.appendReturningEvents(
+            Self.events(.write, count: 3) + [MacFSWFileEvent(eventType: .write, process: other, targetPath: "/tmp/o")]
+        )
+        monitor.queryText = "op:write"
+
+        monitor.pinProcess(77)
+        try await waitUntil { self.monitor.visibleEventCount == 1 }
+        XCTAssertEqual(monitor.queryText, "op:write pid:77")
+        XCTAssertEqual(monitor.pinnedPID, 77)
+
+        monitor.pinProcess(nil)
+        try await waitUntil { self.monitor.visibleEventCount == 4 }
+        XCTAssertEqual(monitor.queryText, "op:write")
+        XCTAssertNil(monitor.pinnedPID)
+    }
+
     private func waitUntil(timeout: Duration = .seconds(2), _ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + timeout
         while !condition() {
