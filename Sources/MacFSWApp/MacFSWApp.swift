@@ -5,6 +5,7 @@ import SwiftUI
 struct MacFSWApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var coordinator = MacFSWAppCoordinator()
+    @AppStorage("MacFSW.ShowsInspector") private var showsInspector = true
 
     var body: some Scene {
         WindowGroup {
@@ -20,7 +21,12 @@ struct MacFSWApp: App {
         }
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
-            InspectorCommands()
+            CommandGroup(after: .sidebar) {
+                Button(showsInspector ? "Hide Inspector" : "Show Inspector") {
+                    showsInspector.toggle()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Session") {
                     coordinator.newSession()

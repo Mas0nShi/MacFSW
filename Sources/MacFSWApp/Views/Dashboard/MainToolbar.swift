@@ -53,7 +53,7 @@ struct MainToolbar: ToolbarContent {
                 Toggle(isOn: inspectorIsPresented) {
                     Label("Inspector", systemImage: "sidebar.trailing")
                 }
-                .help("Show or hide the event inspector")
+                .help("Show or hide the event inspector (⌥⌘I)")
             }
         }
     }

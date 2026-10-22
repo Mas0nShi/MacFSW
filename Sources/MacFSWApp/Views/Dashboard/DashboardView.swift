@@ -5,6 +5,10 @@ import SwiftUI
 struct DashboardView: View {
     @Environment(MacFSWAppCoordinator.self) private var model
     @AppStorage("MacFSW.ShowsInspector") private var showsInspector = true
+    @AppStorage("MacFSW.InspectorWidth") private var inspectorWidth = Self.defaultInspectorWidth
+
+    private static let defaultInspectorWidth: Double = 380
+    private static let inspectorWidthRange: ClosedRange<Double> = 320 ... 640
 
     var body: some View {
         HStack(spacing: 0) {
@@ -23,12 +27,23 @@ struct DashboardView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .inspector(isPresented: inspectorIsPresented) {
-            InspectorView(event: model.monitor.selectedEvent, isLoading: model.monitor.selectedEventIsLoading)
-                .inspectorColumnWidth(min: 320, ideal: 380, max: 640)
+
+            // A plain column rather than `.inspector`: inside that modifier's
+            // split view every row the event table added while scrolling
+            // re-laid-out the whole SwiftUI pane, on every frame while live.
+            if inspectorIsPresented.wrappedValue {
+                InspectorResizeHandle(
+                    width: $inspectorWidth,
+                    range: Self.inspectorWidthRange,
+                    defaultWidth: Self.defaultInspectorWidth
+                )
+                InspectorView(event: model.monitor.selectedEvent, isLoading: model.monitor.selectedEventIsLoading)
+                    .frame(width: min(max(inspectorWidth, Self.inspectorWidthRange.lowerBound), Self.inspectorWidthRange.upperBound))
+                    .transition(.move(edge: .trailing))
+            }
         }
         .animation(.easeInOut(duration: 0.16), value: model.selectedPage)
+        .animation(.easeInOut(duration: 0.18), value: inspectorIsPresented.wrappedValue)
         .toolbar { MainToolbar(model: model, inspectorIsPresented: inspectorIsPresented) }
         .navigationTitle(model.session.research.name)
         .navigationSubtitle(model.windowSubtitle)
@@ -48,6 +63,47 @@ struct DashboardView: View {
             get: { showsInspector && model.selectedPage == .monitor },
             set: { if model.selectedPage == .monitor { showsInspector = $0 } }
         )
+    }
+}
+
+private struct InspectorResizeHandle: View {
+    @Binding var width: Double
+    let range: ClosedRange<Double>
+    let defaultWidth: Double
+
+    @State private var dragStartWidth: Double?
+
+    var body: some View {
+        Divider()
+            .overlay {
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        if hovering {
+                            NSCursor.resizeLeftRight.set()
+                        } else if dragStartWidth == nil {
+                            NSCursor.arrow.set()
+                        }
+                    }
+                    .onTapGesture(count: 2) {
+                        width = defaultWidth
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let start = dragStartWidth ?? width
+                                dragStartWidth = start
+                                NSCursor.resizeLeftRight.set()
+                                width = min(max(start - value.translation.width, range.lowerBound), range.upperBound)
+                            }
+                            .onEnded { _ in
+                                dragStartWidth = nil
+                                NSCursor.arrow.set()
+                            }
+                    )
+            }
+            .accessibilityLabel("Resize inspector")
     }
 }
 

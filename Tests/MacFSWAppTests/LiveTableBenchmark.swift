@@ -49,6 +49,54 @@ final class LiveTableBenchmark: XCTestCase {
         )
     }
 
+    /// Main-thread cost of one scroll step: a screenful by default (a jump to
+    /// the newest row), or `MACFSW_BENCH_STEP_ROWS` rows (a live-follow
+    /// frame). `MACFSW_BENCH_VIEW=monitor|table` hosts less of the window.
+    func testScreenOfNewRows() async throws {
+        let model = makeCoordinator()
+        _ = try await model.session.eventStore.appendReturningEvents(Self.events(count: 20_000, startingAt: 0))
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 860), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        switch ProcessInfo.processInfo.environment["MACFSW_BENCH_VIEW"] {
+        case "monitor":
+            window.contentView = NSHostingView(rootView: MonitorView().environment(model))
+        case "table":
+            window.contentView = NSHostingView(rootView: MonitorTableOnly().environment(model))
+        default:
+            window.contentView = NSHostingView(rootView: DashboardView().environment(model))
+        }
+        window.orderFrontRegardless()
+        model.monitor.pauseFollowing()
+        await model.monitor.refreshFilteredEvents()
+        try await Task.sleep(for: .milliseconds(500))
+
+        func tables(in view: NSView) -> [NSTableView] {
+            ((view as? NSTableView).map { [$0] } ?? []) + view.subviews.flatMap(tables(in:))
+        }
+        let table = try XCTUnwrap(tables(in: window.contentView!).first)
+        let clipView = try XCTUnwrap(table.enclosingScrollView?.contentView)
+        var times: [Duration] = []
+        for screen in 1...(Int(ProcessInfo.processInfo.environment["MACFSW_BENCH_SCREENS"] ?? "") ?? 60) {
+            // Rows load a page at a time; let the page for this screen land
+            // so the timing covers drawing real content.
+            let step = ProcessInfo.processInfo.environment["MACFSW_BENCH_STEP_ROWS"].flatMap { Double($0) }.map { CGFloat($0) * table.rowHeight } ?? clipView.bounds.height
+            let y = CGFloat(screen) * step
+            model.monitor.requestRows(Range(table.rows(in: NSRect(x: 0, y: y, width: 10, height: clipView.bounds.height))) ?? 0..<0)
+            try await Task.sleep(for: .milliseconds(30))
+            let start = ContinuousClock.now
+            clipView.setBoundsOrigin(NSPoint(x: 0, y: y))
+            table.enclosingScrollView?.reflectScrolledClipView(clipView)
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            CATransaction.flush()
+            times.append(ContinuousClock.now - start)
+        }
+        window.close()
+        let sorted = times.sorted()
+        let stepRows = ProcessInfo.processInfo.environment["MACFSW_BENCH_STEP_ROWS"] ?? "a screen of"
+        print("BENCH scroll by \(stepRows) rows: p50=\(sorted[sorted.count / 2]) p95=\(sorted[sorted.count * 95 / 100])")
+    }
+
     /// Clearing a large session while events stream in: how soon the view
     /// empties, how long the store takes, and whether frames hitch.
     func testClearWhileLive() async throws {
@@ -183,6 +231,32 @@ final class LiveTableBenchmark: XCTestCase {
                 parameters: type == .chmod ? [MacFSWEventParameter(key: "mode", label: "Mode", value: "0755"), MacFSWEventParameter(key: "current_mode", label: "Current Mode", value: "0644")] : []
             )
         }
+    }
+}
+
+private struct MonitorTableOnly: View {
+    @Environment(MacFSWAppCoordinator.self) private var model
+
+    var body: some View {
+        @Bindable var monitor = model.monitor
+        EventTableView(
+            rowCount: monitor.visibleEventCount,
+            cacheVersion: monitor.rowCacheVersion,
+            cacheResetSerial: monitor.rowCacheResetSerial,
+            resetSerial: monitor.tableResetSerial,
+            selectedEventID: $monitor.selectedEventID,
+            selectedRow: monitor.selectedRow,
+            followMode: monitor.followMode,
+            scrollToLiveSerial: monitor.scrollToLiveSerial,
+            selectionResetSerial: monitor.selectionResetSerial,
+            rowProvider: { monitor.cachedRow(at: $0) },
+            requestRows: { monitor.requestRows($0) },
+            onUserWillSelect: { _ in },
+            onUserSelected: { _, _ in },
+            onClearSelection: {},
+            onFollowChanged: { _ in },
+            onRowAction: { _, _ in }
+        )
     }
 }
 
