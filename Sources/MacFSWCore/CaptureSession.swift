@@ -21,6 +21,9 @@ public actor MacFSWCaptureSession {
         case appended(events: [MacFSWFileEvent], stats: MacFSWCaptureStats)
         /// Recording state changed; `error` is set when capture failed.
         case stateChanged(MacFSWCaptureState, error: (any Error)?)
+        /// Every event was deleted. Updates before this one describe
+        /// events that no longer exist.
+        case cleared(stats: MacFSWCaptureStats)
     }
 
     public nonisolated let store: MacFSWSQLiteEventStore
@@ -32,6 +35,13 @@ public actor MacFSWCaptureSession {
     private var ingestTask: Task<Void, Never>?
     private var deadlineTask: Task<Void, Never>?
     private var observers: [UUID: AsyncStream<Update>.Continuation] = [:]
+    /// Bumped by `clear()`, so an append that was in flight when the
+    /// events were deleted is not reported as new.
+    private var clearGeneration = 0
+    /// The extension counts received and dropped events for the whole
+    /// stream; these are its counts at the last clear, so stats restart there.
+    private var counterBaseline = (received: UInt64(0), dropped: UInt64(0))
+    private var lastStreamStats: MacFSWCaptureStats?
 
     public init(store: MacFSWSQLiteEventStore, client: any MacFSWCaptureClient, stats: MacFSWCaptureStats = MacFSWCaptureStats()) {
         self.store = store
@@ -111,6 +121,8 @@ public actor MacFSWCaptureSession {
             return
         }
         handle = opened
+        counterBaseline = (0, 0)
+        lastStreamStats = nil
         setState(.recording)
         ingestTask = Task { await self.ingest(incoming) }
         let duration = Duration.seconds(config.maxCaptureDurationSeconds)
@@ -175,13 +187,19 @@ public actor MacFSWCaptureSession {
         try await store.cleanupBackingStore()
     }
 
-    /// Deletes every event; the session stays usable.
+    /// Deletes every event; the session stays usable, recording or not.
+    /// Observers get `.cleared` in order with the other updates.
     public func clear() async throws {
         guard !store.isReadOnly else {
             throw MacFSWCaptureSessionError.readOnly
         }
+        clearGeneration += 1
         try await store.clear()
-        stats = MacFSWCaptureStats()
+        if let lastStreamStats {
+            counterBaseline = (lastStreamStats.receivedEvents, lastStreamStats.droppedEvents)
+        }
+        stats = MacFSWCaptureStats(startedAt: stats.startedAt)
+        publish(.cleared(stats: stats))
     }
 
     /// Writes whatever has arrived since the last write in one transaction.
@@ -203,10 +221,22 @@ public actor MacFSWCaptureSession {
                     finish = .some(error)
                 }
             }
+            if let latestStats {
+                lastStreamStats = latestStats
+            }
             if !events.isEmpty {
                 do {
+                    let generation = clearGeneration
                     let result = try await store.appendReturningEvents(events)
-                    stats = latestStats ?? stats
+                    guard generation == clearGeneration else {
+                        // A clear ran meanwhile and deleted these too.
+                        continue
+                    }
+                    if var latestStats {
+                        latestStats.receivedEvents -= min(latestStats.receivedEvents, counterBaseline.received)
+                        latestStats.droppedEvents -= min(latestStats.droppedEvents, counterBaseline.dropped)
+                        stats = latestStats
+                    }
                     stats.deliveredEvents = result.stats.deliveredEvents
                     publish(.appended(events: result.events, stats: stats))
                 } catch {

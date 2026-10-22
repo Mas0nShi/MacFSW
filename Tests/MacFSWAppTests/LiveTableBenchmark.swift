@@ -49,6 +49,46 @@ final class LiveTableBenchmark: XCTestCase {
         )
     }
 
+    /// Clearing a large session while events stream in: how soon the view
+    /// empties, how long the store takes, and whether frames hitch.
+    func testClearWhileLive() async throws {
+        let model = makeCoordinator()
+        let total = ProcessInfo.processInfo.environment["MACFSW_BENCH_EVENTS"].flatMap { Int($0) } ?? 100_000
+        var next = 0
+        while next < total {
+            let batch = Self.events(count: 2_000, startingAt: next)
+            _ = try await model.session.eventStore.appendReturningEvents(batch)
+            next += batch.count
+        }
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 860), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: DashboardView().environment(model))
+        window.orderFrontRegardless()
+        model.monitor.prepareForLiveCapture()
+        await model.monitor.refreshFilteredEvents()
+        try await Task.sleep(for: .milliseconds(500))
+
+        let frames = FrameRecorder(view: window.contentView!)
+        frames.start()
+        let clicked = ContinuousClock.now
+        model.clearView()
+        let viewEmptied = ContinuousClock.now - clicked
+        while try await model.session.eventStore.count(matching: MacFSWEventQuery()) > 0 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let storeCleared = ContinuousClock.now - clicked
+        for _ in 0..<60 {
+            let batch = try await model.session.eventStore.appendReturningEvents(Self.events(count: 30, startingAt: next))
+            next += 30
+            model.ingest(batch.events)
+            try await Task.sleep(for: .milliseconds(16))
+        }
+        frames.stop()
+        window.close()
+        let worst = frames.intervals.max() ?? .zero
+        print("BENCH clear \(total) while live: view emptied in \(viewEmptied), store cleared in \(storeCleared), worst frame \(worst), rows after=\(model.monitor.visibleEventCount)")
+    }
+
     private func measureLiveFeed(eventsPerSecond: Int, seconds: Int) async throws {
         let model = makeCoordinator()
         let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 860), styleMask: [.titled, .resizable], backing: .buffered, defer: false)

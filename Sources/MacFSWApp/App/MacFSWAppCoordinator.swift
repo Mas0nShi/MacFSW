@@ -97,6 +97,11 @@ final class MacFSWAppCoordinator {
         session.onCaptureStopped = { [weak self] in
             self?.monitor.captureStopped()
         }
+        session.onCleared = { [weak self] in
+            // In stream order: batches after this one are new, so resetting
+            // here cannot drop any.
+            self?.resetViewsAfterClear()
+        }
     }
 
     func reportError(_ error: any Error, category: String = "Error", metadata: [String: String] = [:]) {

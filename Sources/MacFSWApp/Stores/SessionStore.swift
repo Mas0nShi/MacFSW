@@ -32,6 +32,14 @@ final class SessionStore {
     /// Recording ended, by request or because the stream closed.
     @ObservationIgnored
     var onCaptureStopped: () -> Void = {}
+    /// Every event was deleted; anything shown so far is gone.
+    @ObservationIgnored
+    var onCleared: () -> Void = {}
+    /// Set while a clear is under way during recording. Batches still in
+    /// the update stream ahead of `.cleared` were deleted, so they are
+    /// dropped rather than shown.
+    @ObservationIgnored
+    private var isAwaitingCleared = false
 
     @ObservationIgnored
     private var updatesTask: Task<Void, Never>?
@@ -81,8 +89,16 @@ final class SessionStore {
     }
 
     func clearEvents() async throws {
-        try await capture.clear()
+        let isObserving = updatesTask != nil
+        isAwaitingCleared = isObserving
         captureStats = MacFSWCaptureStats()
+        pendingStats = nil
+        do {
+            try await capture.clear()
+        } catch {
+            isAwaitingCleared = false
+            throw error
+        }
         hasUnsavedEvents = false
     }
 
@@ -140,6 +156,9 @@ final class SessionStore {
     private func handle(_ update: MacFSWCaptureSession.Update) {
         switch update {
         case .appended(let events, let stats):
+            guard !isAwaitingCleared else {
+                return
+            }
             scheduleStatsPublish(stats)
             hasUnsavedEvents = true
             onEvents(events)
@@ -156,6 +175,12 @@ final class SessionStore {
             default:
                 break
             }
+        case .cleared(let stats):
+            isAwaitingCleared = false
+            pendingStats = nil
+            captureStats = stats
+            hasUnsavedEvents = false
+            onCleared()
         }
     }
 

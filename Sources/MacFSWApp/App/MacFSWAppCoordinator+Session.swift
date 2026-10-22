@@ -66,17 +66,23 @@ extension MacFSWAppCoordinator {
         guard !session.isReadOnly else {
             return
         }
-        monitor.cancelAllWork()
+        // The views empty at once; the store catches up in the background.
+        resetViewsAfterClear()
         Task {
             do {
                 try await session.clearEvents()
-                monitor.resetAfterClear()
-                resetProcessDerivedState()
                 errorMessage = nil
             } catch {
                 reportError(error)
+                await monitor.refreshFilteredEvents()
+                await refreshProcessSummaries()
             }
         }
+    }
+
+    func resetViewsAfterClear() {
+        monitor.resetAfterClear()
+        resetProcessDerivedState()
     }
 
     static let sessionContentType = UTType(exportedAs: "com.mas0n.macfsw-session")

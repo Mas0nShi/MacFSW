@@ -25,6 +25,8 @@ final class CaptureSessionTests: XCTestCase {
                 if state == .stopped || state == .failed {
                     finalState = state
                 }
+            case .cleared:
+                XCTFail("nothing cleared")
             }
             if finalState != nil {
                 break
@@ -52,6 +54,68 @@ final class CaptureSessionTests: XCTestCase {
         let stored = try await session.store.count(matching: MacFSWEventQuery())
         XCTAssertEqual(stored, 10_000)
         try await session.close()
+    }
+
+    func testClearWhileRecordingIsOrderedWithTheUpdates() async throws {
+        let client = FakeCaptureClient()
+        let session = try MacFSWCaptureSession.temporary(for: MacFSWResearchSession(), client: client)
+        let updates = await session.updates()
+        try await session.start(config: MacFSWCaptureConfig())
+        client.deliver(Self.events(batch: 0, count: 10))
+        try await waitForStoredCount(10, in: session)
+
+        try await session.clear()
+        client.deliver(Self.events(batch: 1, count: 3))
+        client.finish()
+
+        var sawCleared = false
+        var appendedAfterClear: [String] = []
+        loop: for await update in updates {
+            switch update {
+            case .appended(let events, let stats):
+                if sawCleared {
+                    appendedAfterClear += events.map(\.targetPath)
+                    XCTAssertEqual(stats.deliveredEvents, 3)
+                }
+            case .cleared(let stats):
+                sawCleared = true
+                XCTAssertEqual(stats.deliveredEvents, 0)
+            case .stateChanged(.stopped, _):
+                break loop
+            case .stateChanged:
+                continue
+            }
+        }
+        XCTAssertTrue(sawCleared)
+        XCTAssertEqual(appendedAfterClear, (0..<3).map { "/tmp/1-\($0)" })
+        let stored = try await session.store.events(matching: MacFSWEventQuery())
+        XCTAssertEqual(stored.map(\.sequence), [1, 2, 3])
+        try await session.close()
+    }
+
+    func testClearedStoreKeepsWorking() async throws {
+        let store = try MacFSWSQLiteEventStore.temporary()
+        _ = try await store.appendReturningEvents(Self.events(batch: 0, count: 50))
+        try await store.clear()
+        let countAfterClear = try await store.count(matching: MacFSWEventQuery())
+        XCTAssertEqual(countAfterClear, 0)
+
+        _ = try await store.appendReturningEvents(Self.events(batch: 7, count: 2))
+        let textMatches = try await store.count(matching: MacFSWQueryParser.parse("7-1"))
+        XCTAssertEqual(textMatches, 1)
+        let stored = try await store.events(matching: MacFSWEventQuery())
+        XCTAssertEqual(stored.map(\.sequence), [1, 2])
+        try await store.cleanupBackingStore()
+    }
+
+    private func waitForStoredCount(_ count: Int, in session: MacFSWCaptureSession) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while try await session.store.count(matching: MacFSWEventQuery()) < count {
+            guard ContinuousClock.now < deadline else {
+                return XCTFail("Timed out waiting for \(count) stored events")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     func testGracefulStopKeepsEventsSentAfterTheStopRequest() async throws {
