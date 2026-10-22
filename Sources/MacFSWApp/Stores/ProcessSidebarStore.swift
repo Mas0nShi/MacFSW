@@ -35,9 +35,6 @@ final class ProcessSidebarStore {
     }
 
     func update(with events: [MacFSWFileEvent]) {
-        guard !events.isEmpty else {
-            return
-        }
         ProcessSummaryReducer.update(index: &processSummaryIndex, with: events)
         schedulePublish()
     }

@@ -110,56 +110,52 @@ extension MonitorStore {
         appendedSummaries: [MacFSWEventRowSummary],
         renderGeneration: Int
     ) async {
-        do {
-            guard followMode == .live, liveRenderGeneration == renderGeneration else {
-                requeueVisibleRender(
-                    visibleMutationCount: visibleMutationCount,
-                    appendedSummaries: appendedSummaries
-                )
-                return
-            }
-            guard let snapshot = activeSnapshot else {
-                await refreshFilteredEvents()
-                return
-            }
-            let updatedSnapshot = try await eventStore.appendRowsToResultSnapshot(
-                snapshot,
-                rows: appendedSummaries,
-                limit: activeQuery.limit
+        guard followMode == .live, liveRenderGeneration == renderGeneration else {
+            requeueVisibleRender(
+                visibleMutationCount: visibleMutationCount,
+                appendedSummaries: appendedSummaries
             )
-            guard followMode == .live, liveRenderGeneration == renderGeneration else {
-                retireSnapshot(updatedSnapshot)
-                requeueVisibleRender(
-                    visibleMutationCount: visibleMutationCount,
-                    appendedSummaries: appendedSummaries
-                )
-                return
-            }
-            // The monitor never applies a row limit, so live events only
-            // ever extend the result at its tail.
-            activeSnapshot = updatedSnapshot
-            applyOperationSummaryDelta(from: appendedSummaries)
-            let previousCount = visibleEventCount
-            let count = updatedSnapshot.visibleCount
-            let didCacheAppendedRows = cacheAppendedRows(
-                appendedSummaries,
-                previousCount: previousCount,
-                newCount: count
-            )
-            visibleEventCount = count
-            totalMatchingEventCount = updatedSnapshot.totalCount
-            if count > previousCount, !didCacheAppendedRows {
-                invalidateRowPages(for: previousCount..<count)
-            }
-
-            if followMode == .live, isViewingLiveEdge {
-                unseenEventCount = 0
-            }
-            preloadRowsForCurrentViewport()
-            lastUpdatedAt = Date()
-        } catch {
-            reportError(error)
+            return
         }
+        guard let snapshot = activeSnapshot else {
+            await refreshFilteredEvents()
+            return
+        }
+        let updatedSnapshot = await eventStore.appendRowsToResultSnapshot(
+            snapshot,
+            rows: appendedSummaries,
+            limit: activeQuery.limit
+        )
+        guard followMode == .live, liveRenderGeneration == renderGeneration else {
+            retireSnapshot(updatedSnapshot)
+            requeueVisibleRender(
+                visibleMutationCount: visibleMutationCount,
+                appendedSummaries: appendedSummaries
+            )
+            return
+        }
+        // The monitor never applies a row limit, so live events only
+        // ever extend the result at its tail.
+        activeSnapshot = updatedSnapshot
+        applyOperationSummaryDelta(from: appendedSummaries)
+        let previousCount = visibleEventCount
+        let count = updatedSnapshot.visibleCount
+        let didCacheAppendedRows = cacheAppendedRows(
+            appendedSummaries,
+            previousCount: previousCount,
+            newCount: count
+        )
+        visibleEventCount = count
+        totalMatchingEventCount = updatedSnapshot.totalCount
+        if count > previousCount, !didCacheAppendedRows {
+            invalidateRowPages(for: previousCount..<count)
+        }
+
+        if followMode == .live, isViewingLiveEdge {
+            unseenEventCount = 0
+        }
+        preloadRowsForCurrentViewport()
+        lastUpdatedAt = Date()
     }
 
     func requeueVisibleRender(

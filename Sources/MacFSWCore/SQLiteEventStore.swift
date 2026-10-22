@@ -142,10 +142,6 @@ public actor MacFSWSQLiteEventStore {
     }
 
     public func appendReturningEvents(_ incoming: [MacFSWFileEvent]) async throws -> MacFSWEventAppendResult {
-        guard !incoming.isEmpty else {
-            return MacFSWEventAppendResult(events: [], stats: try await stats())
-        }
-
         let sequenced = try await dbQueue.write { db in
             let databaseNextSequence = try Self.readNextSequence(db)
             var sequence = databaseNextSequence

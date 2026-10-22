@@ -36,11 +36,7 @@ extension MacFSWSQLiteEventStore {
         return MacFSWEventResultSnapshot(id: snapshotID, totalCount: total, visibleCount: visibleCount)
     }
 
-    public func deleteResultSnapshots(_ snapshotIDs: [String]) async throws {
-        let snapshotIDs = Array(Set(snapshotIDs)).filter { !$0.isEmpty }
-        guard !snapshotIDs.isEmpty else {
-            return
-        }
+    public func deleteResultSnapshots(_ snapshotIDs: [String]) {
         for snapshotID in snapshotIDs {
             resultSnapshots[snapshotID] = nil
         }
@@ -97,10 +93,7 @@ extension MacFSWSQLiteEventStore {
         _ snapshot: MacFSWEventResultSnapshot,
         rows: [MacFSWEventRowSummary],
         limit: Int
-    ) async throws -> MacFSWEventResultSnapshot {
-        guard !rows.isEmpty else {
-            return snapshot
-        }
+    ) -> MacFSWEventResultSnapshot {
         let hasVisibleLimit = limit > 0
         let visibleLimit = hasVisibleLimit ? limit : Int.max
         let currentTotal = resultSnapshots[snapshot.id]?.totalCount ?? snapshot.totalCount

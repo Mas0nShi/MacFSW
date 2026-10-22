@@ -226,15 +226,7 @@ extension MonitorStore {
         let snapshotIDs = Array(retiredSnapshotIDs)
         retiredSnapshotIDs.removeAll(keepingCapacity: true)
         snapshotCleanupTask = nil
-        guard !snapshotIDs.isEmpty else {
-            return
-        }
-
-        do {
-            try await eventStore.deleteResultSnapshots(snapshotIDs)
-        } catch {
-            reportError(error)
-        }
+        await eventStore.deleteResultSnapshots(snapshotIDs)
     }
 
     func cancelSnapshotCleanup() {

@@ -470,7 +470,7 @@ final class MacFSWCoreTests: XCTestCase {
         let appendResult = try await store.appendReturningEvents([
             MacFSWFileEvent(eventType: .rename, process: process, targetPath: "/tmp/8")
         ])
-        let updatedSnapshot = try await store.appendRowsToResultSnapshot(
+        let updatedSnapshot = await store.appendRowsToResultSnapshot(
             snapshot,
             rows: appendResult.events.map(MacFSWEventRowSummary.init(event:)),
             limit: query.limit
