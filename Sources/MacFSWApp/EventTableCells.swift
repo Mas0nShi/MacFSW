@@ -1,9 +1,14 @@
 import AppKit
 import MacFSWCore
 
-/// One table cell: an optional operation icon and a line of styled text.
-/// Styling is kept as roles rather than colors so the text can switch to
-/// the selection's contrasting color when the row is highlighted.
+/// One table cell: an optional operation icon and a line of styled text,
+/// drawn directly. A text field per cell cost ~85% of a new row's time
+/// (sizing, constraints, its own drawing); this view only draws.
+///
+/// What the text field provided for free is done here: accessibility
+/// text, redrawing on appearance changes, and a full-text tooltip when the
+/// text is truncated. Styling is kept as roles rather than colors so the
+/// text can switch to the selection's contrasting color.
 @MainActor
 final class EventTableCellView: NSTableCellView {
     enum Role {
@@ -16,38 +21,23 @@ final class EventTableCellView: NSTableCellView {
         var font: NSFont = .systemFont(ofSize: 12)
     }
 
-    private let label = NSTextField(labelWithString: "")
-    private let icon = NSImageView()
-    private var iconColor: NSColor?
+    private static let inset: CGFloat = 6
+    private static let iconSize: CGFloat = 16
+    private static let iconSpacing: CGFloat = 6
+
     private var segments: [Segment] = []
     private var lineBreakMode: NSLineBreakMode = .byTruncatingTail
-    private var labelLeadingWithIcon: NSLayoutConstraint!
-    private var labelLeadingWithoutIcon: NSLayoutConstraint!
+    private var icon: NSImage?
+    private var iconColor: NSColor?
+    private var explicitToolTip: String?
+    private var plainText = ""
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.maximumNumberOfLines = 1
-        label.cell?.truncatesLastVisibleLine = true
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.imageScaling = .scaleProportionallyDown
-        addSubview(icon)
-        addSubview(label)
-        textField = label
-        imageView = icon
-        let leadingWithIcon = label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6)
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 16),
-            icon.heightAnchor.constraint(equalToConstant: 16),
-            leadingWithIcon,
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        labelLeadingWithIcon = leadingWithIcon
-        labelLeadingWithoutIcon = label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6)
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
     }
 
     @available(*, unavailable)
@@ -56,7 +46,12 @@ final class EventTableCellView: NSTableCellView {
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { render() }
+        didSet { needsDisplay = true }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 
     func configure(
@@ -68,13 +63,79 @@ final class EventTableCellView: NSTableCellView {
     ) {
         self.segments = segments
         self.lineBreakMode = lineBreakMode
+        self.icon = symbolName.map(Self.symbolImage)
         self.iconColor = iconColor
-        icon.image = symbolName.map(Self.symbolImage)
-        icon.isHidden = icon.image == nil
-        labelLeadingWithIcon.isActive = !icon.isHidden
-        labelLeadingWithoutIcon.isActive = icon.isHidden
-        self.toolTip = toolTip
-        render()
+        explicitToolTip = toolTip
+        plainText = segments.map(\.text).joined()
+        setAccessibilityValue(plainText)
+        needsDisplay = true
+    }
+
+    /// The cell's text as one string, for type-select and accessibility.
+    var text: String {
+        plainText
+    }
+
+    // MARK: - Drawing
+
+    override func draw(_ dirtyRect: NSRect) {
+        let isHighlighted = backgroundStyle == .emphasized
+        var textRect = bounds.insetBy(dx: Self.inset, dy: 0)
+        if let icon {
+            let iconRect = NSRect(
+                x: textRect.minX,
+                y: (bounds.height - Self.iconSize) / 2,
+                width: Self.iconSize,
+                height: Self.iconSize
+            )
+            drawTinted(icon, in: iconRect, color: isHighlighted ? .alternateSelectedControlTextColor : iconColor ?? .labelColor)
+            textRect.origin.x = iconRect.maxX + Self.iconSpacing
+            textRect.size.width = bounds.maxX - Self.inset - textRect.minX
+        }
+        guard !segments.isEmpty, textRect.width > 0 else {
+            return
+        }
+        let text = attributedText(highlighted: isHighlighted)
+        let lineHeight = ceil(segments.map { $0.font.ascender - $0.font.descender + $0.font.leading }.max() ?? 15)
+        textRect.origin.y = floor((bounds.height - lineHeight) / 2)
+        textRect.size.height = lineHeight
+        text.draw(with: textRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+
+    private func attributedText(highlighted: Bool) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = lineBreakMode
+        let text = NSMutableAttributedString()
+        for segment in segments {
+            text.append(NSAttributedString(string: segment.text, attributes: [
+                .font: segment.font,
+                .foregroundColor: highlighted ? NSColor.alternateSelectedControlTextColor : Self.color(for: segment.role),
+                .paragraphStyle: paragraph,
+            ]))
+        }
+        return text
+    }
+
+    private func drawTinted(_ image: NSImage, in rect: NSRect, color: NSColor) {
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            return
+        }
+        context.saveGState()
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        image.draw(in: rect)
+        color.setFill()
+        rect.fill(using: .sourceAtop)
+        context.endTransparencyLayer()
+        context.restoreGState()
+    }
+
+    private static func color(for role: Role) -> NSColor {
+        switch role {
+        case .primary: .labelColor
+        case .secondary: .secondaryLabelColor
+        case .tertiary: .tertiaryLabelColor
+        case .accent(let color): color
+        }
     }
 
     /// Symbol lookup and configuration cost ~120 µs; there are only a
@@ -91,28 +152,28 @@ final class EventTableCellView: NSTableCellView {
         return image
     }
 
-    private func render() {
-        let isHighlighted = backgroundStyle == .emphasized
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = lineBreakMode
-        let text = NSMutableAttributedString()
-        for segment in segments {
-            text.append(NSAttributedString(string: segment.text, attributes: [
-                .font: segment.font,
-                .foregroundColor: isHighlighted ? NSColor.alternateSelectedControlTextColor : color(for: segment.role),
-                .paragraphStyle: paragraph,
-            ]))
-        }
-        label.attributedStringValue = text
-        icon.contentTintColor = isHighlighted ? .alternateSelectedControlTextColor : iconColor
-    }
+    // MARK: - Tooltip
 
-    private func color(for role: Role) -> NSColor {
-        switch role {
-        case .primary: .labelColor
-        case .secondary: .secondaryLabelColor
-        case .tertiary: .tertiaryLabelColor
-        case .accent(let color): color
+    // Computed on hover only: measuring every cell's text up front is the
+    // cost this view exists to avoid. The tooltip rect follows the frame.
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed {
+            removeAllToolTips()
+            addToolTip(bounds, owner: self, userData: nil)
+        }
+    }
+}
+
+extension EventTableCellView: NSViewToolTipOwner {
+    nonisolated func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        MainActor.assumeIsolated {
+            if let explicitToolTip {
+                return explicitToolTip
+            }
+            let available = bounds.width - 2 * Self.inset - (icon == nil ? 0 : Self.iconSize + Self.iconSpacing)
+            return attributedText(highlighted: false).size().width > available ? plainText : ""
         }
     }
 }

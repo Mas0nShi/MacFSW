@@ -40,6 +40,15 @@ final class UISnapshotTests: XCTestCase {
         try await snapshot(model, named: "02-events-inspector")
     }
 
+    func testRecordedEventsInDarkMode() async throws {
+        let model = makeCoordinator()
+        model.extensionStatus.applyHealth(MacFSWCaptureHealth(endpointSecurityAuthorized: true, message: "ok"))
+        try await fill(model)
+        model.monitor.selectEvent(nil, row: 3)
+        try await settle()
+        try await snapshot(model, named: "05-events-dark", appearance: NSAppearance(named: .darkAqua))
+    }
+
     /// The inspector column alone: offscreen rendering cannot draw it inside
     /// the window's split view.
     func testInspectorContent() async throws {
@@ -100,7 +109,7 @@ final class UISnapshotTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(400))
     }
 
-    private func snapshot(_ model: MacFSWAppCoordinator, named name: String) async throws {
+    private func snapshot(_ model: MacFSWAppCoordinator, named name: String, appearance: NSAppearance? = nil) async throws {
         let size = NSSize(width: 1440, height: 860)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -113,6 +122,7 @@ final class UISnapshotTests: XCTestCase {
         // WindowGroup scene does in the app.
         host.sceneBridgingOptions = [.toolbars, .title]
         window.isReleasedWhenClosed = false
+        window.appearance = appearance
         window.toolbarStyle = .unified
         window.contentView = host
         window.layoutIfNeeded()

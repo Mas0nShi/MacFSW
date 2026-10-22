@@ -23,6 +23,32 @@ extension EventTableView.Coordinator {
             return cell
         }
 
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            let identifier = NSUserInterfaceItemIdentifier("EventRow")
+            if let rowView = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableRowView {
+                return rowView
+            }
+            let rowView = NSTableRowView()
+            rowView.identifier = identifier
+            // One layer per row instead of one per cell: a screenful of new
+            // rows otherwise means ~150 backing stores to draw and commit.
+            rowView.canDrawSubviewsIntoLayer = true
+            return rowView
+        }
+
+        /// Typing in the table jumps to a row whose process or path starts
+        /// with what was typed. Cells have no text field for AppKit to read.
+        func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
+            guard let summary = rowProvider(row) ?? rowSnapshots[row] else {
+                return nil
+            }
+            switch tableColumn.flatMap({ EventTableColumn(rawValue: $0.identifier.rawValue) }) {
+            case .process: return summary.processName
+            case .path: return (summary.targetPath as NSString).lastPathComponent
+            default: return nil
+            }
+        }
+
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !isApplyingSwiftUISelection else {
                 return
