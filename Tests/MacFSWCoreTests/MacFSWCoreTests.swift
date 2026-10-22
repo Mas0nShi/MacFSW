@@ -240,7 +240,7 @@ final class MacFSWCoreTests: XCTestCase {
         let selected = try await store.event(matching: MacFSWQueryParser.parse("detail:0644"), visibleRow: 0)
         let count = try await store.count(matching: MacFSWQueryParser.parse("0644"))
 
-        XCTAssertEqual(rows.first?.detailSummary, "mode 0644 · was 0755")
+        XCTAssertEqual(rows.first?.detailSummary, "rwxr-xr-x → rw-r--r-- (0644)")
         XCTAssertEqual(selected?.parameters.first?.value, "0644")
         XCTAssertEqual(count, 1)
     }

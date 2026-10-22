@@ -240,7 +240,7 @@ final class MacFSWAnalysisTests: XCTestCase {
         XCTAssertEqual(prepared.totalEventCount, 10)
         XCTAssertEqual(prepared.fetchedEventCount, 3)
         XCTAssertEqual(prepared.sampledEventCount, 3)
-        XCTAssertTrue(prepared.userPrompt.contains("mode 0644"))
+        XCTAssertTrue(prepared.userPrompt.contains("rwxr-xr-x → rw-r--r-- (0644)"))
         XCTAssertTrue(prepared.userPrompt.contains("source=/tmp/src"))
         XCTAssertLessThan(
             prepared.userPrompt.range(of: "seq=1")!.lowerBound,
