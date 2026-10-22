@@ -17,25 +17,24 @@ struct OperationStatsPane: View {
         Dictionary(uniqueKeysWithValues: model.monitor.operationSummaries.map { ($0.bucket, $0) })
     }
 
-    /// Buckets in the order shown. Ranked by count, but a new ranking is
-    /// adopted only after it has held for a second: while recording, close
-    /// counts would otherwise swap rows several times a second, and the
-    /// reorder animation would never stop.
-    @State private var displayedOrder: [MacFSWOperationBucket] = []
+    /// Ranked by count, but holding through near-ties and moving at most
+    /// once a second (see `StableRanking`): while recording, counts change
+    /// several times a second.
+    @State private var order = StableRanking<MacFSWOperationBucket>()
 
     private func summaries(in order: [MacFSWOperationBucket]) -> [MacFSWOperationSummary] {
         let byBucket = summaryByBucket
         return (order.isEmpty ? buckets : order).map { byBucket[$0] ?? MacFSWOperationSummary(bucket: $0, eventCount: 0) }
     }
 
-    private var ranking: [MacFSWOperationBucket] {
+    private var ranked: [(id: MacFSWOperationBucket, count: Int)] {
         summaries(in: buckets)
             .sorted { lhs, rhs in
                 lhs.eventCount != rhs.eventCount
                     ? lhs.eventCount > rhs.eventCount
                     : bucketRank(lhs.bucket) < bucketRank(rhs.bucket)
             }
-            .map(\.bucket)
+            .map { ($0.bucket, $0.eventCount) }
     }
 
     private func bucketRank(_ bucket: MacFSWOperationBucket) -> Int {
@@ -43,7 +42,7 @@ struct OperationStatsPane: View {
     }
 
     var body: some View {
-        let summaries = summaries(in: displayedOrder)
+        let summaries = summaries(in: order.order)
         let total = summaries.reduce(0) { $0 + $1.eventCount }
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -60,20 +59,26 @@ struct OperationStatsPane: View {
                 }
             }
         }
-        .task(id: ranking) {
-            let ranking = ranking
-            guard ranking != displayedOrder else {
-                return
-            }
-            if !displayedOrder.isEmpty {
-                try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled else {
-                    return
+        .task(id: model.monitor.operationSummaries) {
+            var retryAfter: Duration?
+            repeat {
+                if let delay = retryAfter {
+                    try? await Task.sleep(for: delay)
+                    guard !Task.isCancelled else {
+                        return
+                    }
                 }
-            }
-            withAnimation(.easeInOut(duration: 0.25)) {
-                displayedOrder = ranking
-            }
+                var next = order
+                let update = next.update(ranked)
+                if update.moved {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        order = next
+                    }
+                } else {
+                    order = next
+                }
+                retryAfter = update.retryAfter
+            } while retryAfter != nil
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

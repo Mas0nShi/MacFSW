@@ -1,13 +1,14 @@
 import Foundation
-import Observation
 import MacFSWCore
+import Observation
+import SwiftUI
 
 @MainActor
 @Observable
 final class ProcessSidebarStore {
     var processSearchText = "" {
         didSet {
-            schedulePublish()
+            schedulePublish(reordering: .immediately)
         }
     }
 
@@ -17,7 +18,7 @@ final class ProcessSidebarStore {
     var expandedProcessGroupIDs: Set<String> = []
     var includeExitedProcesses: Bool {
         didSet {
-            publish()
+            publish(reordering: .immediately)
         }
     }
 
@@ -25,6 +26,17 @@ final class ProcessSidebarStore {
     private var processSummaryIndex: [MacFSWProcessSummary.ID: MacFSWProcessSummary] = [:]
     @ObservationIgnored
     private var publishTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var reorderTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var groupOrder = StableRanking<MacFSWProcessGroupSummary.ID>()
+
+    /// Reordering the user asked for (search, filters, a new session) shows
+    /// at once; reordering from counts changing while recording is throttled.
+    private enum Reordering {
+        case immediately
+        case throttled
+    }
 
     init(includeExitedProcesses: Bool = true) {
         self.includeExitedProcesses = includeExitedProcesses
@@ -43,12 +55,12 @@ final class ProcessSidebarStore {
         processSummaryIndex = Dictionary(summaries.map { ($0.id, $0) }, uniquingKeysWith: { lhs, rhs in
             lhs.lastEventNS >= rhs.lastEventNS ? lhs : rhs
         })
-        publish()
+        publish(reordering: .immediately)
     }
 
     func clear() {
-        publishTask?.cancel()
-        publishTask = nil
+        cancelPublishing()
+        groupOrder = StableRanking()
         processSummaryIndex.removeAll(keepingCapacity: true)
         processSummaries = []
         filteredProcessSummaries = []
@@ -59,6 +71,8 @@ final class ProcessSidebarStore {
     func cancelPublishing() {
         publishTask?.cancel()
         publishTask = nil
+        reorderTask?.cancel()
+        reorderTask = nil
     }
 
     func summary(for id: MacFSWProcessSummary.ID) -> MacFSWProcessSummary? {
@@ -69,7 +83,11 @@ final class ProcessSidebarStore {
         summary(for: id) != nil
     }
 
-    private func schedulePublish() {
+    private func schedulePublish(reordering: Reordering = .throttled) {
+        if reordering == .immediately {
+            publishTask?.cancel()
+            publishTask = nil
+        }
         guard publishTask == nil else {
             return
         }
@@ -78,13 +96,15 @@ final class ProcessSidebarStore {
             guard !Task.isCancelled else {
                 return
             }
-            self?.publish()
+            self?.publish(reordering: reordering)
         }
     }
 
-    private func publish() {
+    private func publish(reordering: Reordering = .throttled) {
         publishTask?.cancel()
         publishTask = nil
+        reorderTask?.cancel()
+        reorderTask = nil
         let summaries = ProcessSummaryReducer.summaries(from: processSummaryIndex)
         processSummaries = summaries
         let filtered = ProcessSummaryReducer.filteredSummaries(
@@ -93,7 +113,30 @@ final class ProcessSidebarStore {
             includeExited: includeExitedProcesses
         )
         filteredProcessSummaries = filtered
-        filteredProcessGroups = ProcessSummaryReducer.groups(from: filtered)
+
+        let ranked = ProcessSummaryReducer.groups(from: filtered)
+        if reordering == .immediately {
+            groupOrder = StableRanking()
+        }
+        let update = groupOrder.update(ranked.map { ($0.id, $0.eventCount) })
+        let byID = Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0) })
+        let groups = update.order.compactMap { byID[$0] }
+        if update.moved {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                filteredProcessGroups = groups
+            }
+        } else {
+            filteredProcessGroups = groups
+        }
+        if let retryAfter = update.retryAfter {
+            reorderTask = Task { [weak self] in
+                try? await Task.sleep(for: retryAfter)
+                guard !Task.isCancelled else {
+                    return
+                }
+                self?.publish()
+            }
+        }
     }
 
     func toggleProcessGroup(_ id: String) {
