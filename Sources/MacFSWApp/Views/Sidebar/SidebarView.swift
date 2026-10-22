@@ -20,16 +20,32 @@ struct SidebarView: View {
 
             OperationStatsPane()
 
-            Divider()
+            // Ready is the normal state and lives in the status bar; the
+            // card appears only when the extension needs the user.
+            if extensionNeedsAttention {
+                Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                SidebarSectionHeader("System Extension")
-                SystemExtensionStatusView()
+                VStack(alignment: .leading, spacing: 8) {
+                    SidebarSectionHeader("System Extension")
+                    SystemExtensionStatusView()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .transition(.opacity)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
         }
+        .animation(.easeInOut(duration: 0.16), value: extensionNeedsAttention)
         .background(.bar)
+    }
+}
+
+private extension SidebarView {
+    var extensionNeedsAttention: Bool {
+        let status = model.extensionStatus
+        return status.installState != .ready
+            || status.isRunningOutdatedExtension
+            || status.completedUpdate != nil
+            || model.session.captureHealth.fullDiskAccessHint
     }
 }
 

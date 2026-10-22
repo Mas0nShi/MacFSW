@@ -18,6 +18,10 @@ final class SystemExtensionStatusStore {
     @ObservationIgnored
     private var pendingUpdate: (from: String, to: String)?
 
+    func acknowledgeUpdate() {
+        completedUpdate = nil
+    }
+
     /// The running extension is not the one this app bundles: health
     /// checks may pass while newer capabilities are missing.
     var isRunningOutdatedExtension: Bool {

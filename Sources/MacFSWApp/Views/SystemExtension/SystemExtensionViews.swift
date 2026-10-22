@@ -189,9 +189,16 @@ private struct ExtensionVersionNote: View {
             }
             .font(.caption)
         } else if let update = status.completedUpdate {
-            Label("Updated from \(update.from) to \(update.to).", systemImage: "checkmark.circle")
-                .font(.caption)
-                .foregroundStyle(.green)
+            HStack {
+                Label("Updated from \(update.from) to \(update.to).", systemImage: "checkmark.circle")
+                    .foregroundStyle(.green)
+                Spacer()
+                Button("OK") {
+                    status.acknowledgeUpdate()
+                }
+                .buttonStyle(.borderless)
+            }
+            .font(.caption)
         } else if let running = status.runningVersion {
             Text("Version \(running.description)")
                 .font(.caption)
