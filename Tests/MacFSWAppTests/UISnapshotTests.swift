@@ -19,6 +19,10 @@ final class UISnapshotTests: XCTestCase {
         }
         outputDirectory = URL(fileURLWithPath: path, isDirectory: true)
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        // Start from the default column layout, not one autosaved by a previous run.
+        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains("MacFSW.EventTable") {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
     }
 
     func testEmptySession() async throws {
@@ -80,7 +84,10 @@ final class UISnapshotTests: XCTestCase {
                 eventType: types[i % types.count],
                 process: processes[i % processes.count],
                 targetPath: paths[i % paths.count],
-                sourcePath: types[i % types.count] == .rename ? "/private/tmp/staging-\(i)" : nil
+                sourcePath: types[i % types.count] == .rename ? "/private/tmp/staging-\(i)" : nil,
+                parameters: types[i % types.count] == .chmod
+                    ? [MacFSWEventParameter(key: "mode", label: "Mode", value: "0755"), MacFSWEventParameter(key: "current_mode", label: "Current Mode", value: "0644")]
+                    : []
             ))
         }
         let result = try await model.session.eventStore.appendReturningEvents(events)

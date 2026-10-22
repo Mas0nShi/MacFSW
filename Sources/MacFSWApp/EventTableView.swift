@@ -40,11 +40,12 @@ struct EventTableView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let tableView = SelectableEventTableView()
+        tableView.style = .fullWidth
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = false
         tableView.allowsEmptySelection = true
         tableView.selectionHighlightStyle = .regular
-        tableView.rowHeight = 30
+        tableView.rowHeight = 26
         tableView.headerView = NSTableHeaderView()
         tableView.dataSource = context.coordinator
         tableView.delegate = context.coordinator
@@ -61,14 +62,22 @@ struct EventTableView: NSViewRepresentable {
             coordinator?.scheduleClearSelection()
         }
         tableView.menu = context.coordinator.makeContextMenu()
-        tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 
-        addColumn("time", "Time", 148, to: tableView)
-        addColumn("process", "Process", 170, to: tableView)
-        addColumn("pid", "PID", 70, to: tableView)
-        addColumn("target", "Target", 420, to: tableView)
-        addColumn("details", "Details", 280, to: tableView)
-        addColumn("signing", "Signing", 180, to: tableView)
+        for column in EventTableColumn.allCases {
+            let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
+            tableColumn.title = column.title
+            tableColumn.width = column.width
+            tableColumn.minWidth = min(column.width, 80)
+            tableColumn.resizingMask = column.isFlexible ? [.autoresizingMask, .userResizingMask] : .userResizingMask
+            tableColumn.isHidden = column.isHiddenByDefault
+            tableView.addTableColumn(tableColumn)
+        }
+        // Remembers widths, order, and hidden columns; set after the
+        // columns exist so the saved layout is applied to them.
+        tableView.autosaveName = "MacFSW.EventTable"
+        tableView.autosaveTableColumns = true
+        tableView.headerView?.menu = context.coordinator.makeColumnMenu()
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -77,6 +86,11 @@ struct EventTableView: NSViewRepresentable {
         scrollView.contentView.postsBoundsChangedNotifications = true
         context.coordinator.tableView = tableView
         context.coordinator.observe(scrollView: scrollView)
+        // Column autoresizing only reacts to resizes; fit the flexible
+        // columns to the first real width so none start off-screen.
+        DispatchQueue.main.async { [weak tableView] in
+            tableView?.sizeToFit()
+        }
         return scrollView
     }
 
@@ -113,7 +127,8 @@ struct EventTableView: NSViewRepresentable {
 
         let hasPendingLiveScrollRequest = context.coordinator.lastScrollToLiveSerial != scrollToLiveSerial
         var shouldScrollToLive = hasPendingLiveScrollRequest && followMode == .live
-        if context.coordinator.lastResetSerial != resetSerial {
+        let didReset = context.coordinator.lastResetSerial != resetSerial
+        if didReset {
             tableView.reloadData()
             context.coordinator.lastRowCount = rowCount
             context.coordinator.lastResetSerial = resetSerial
@@ -144,7 +159,7 @@ struct EventTableView: NSViewRepresentable {
 
         if shouldScrollToLive {
             context.coordinator.lastScrollToLiveSerial = scrollToLiveSerial
-            context.coordinator.scrollToLive()
+            context.coordinator.scrollToLive(animated: !hasPendingLiveScrollRequest && !didReset)
         } else if hasPendingLiveScrollRequest, followMode != .live {
             context.coordinator.lastScrollToLiveSerial = scrollToLiveSerial
         } else {
@@ -156,14 +171,6 @@ struct EventTableView: NSViewRepresentable {
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
         coordinator.stopObserving()
-    }
-
-    private func addColumn(_ identifier: String, _ title: String, _ width: CGFloat, to tableView: NSTableView) {
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
-        column.title = title
-        column.width = width
-        column.minWidth = max(48, min(width, 100))
-        tableView.addTableColumn(column)
     }
 
     @MainActor
@@ -229,6 +236,7 @@ struct EventTableView: NSViewRepresentable {
         weak var tableView: NSTableView?
         var isApplyingSwiftUISelection = false
         var isProgrammaticScroll = false
+        var isAnimatingToLive = false
         var lastScrollToLiveSerial = 0
         var lastSelectionResetSerial = 0
         var lastRowCount = 0

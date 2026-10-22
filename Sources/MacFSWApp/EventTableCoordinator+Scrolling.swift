@@ -36,7 +36,8 @@ extension EventTableView.Coordinator {
         }
 
         func isAtLiveEdge() -> Bool {
-            guard let scrollView = tableView?.enclosingScrollView else {
+            // Mid-animation the view is still on its way down to the edge.
+            guard !isAnimatingToLive, let scrollView = tableView?.enclosingScrollView else {
                 return true
             }
             return isAtLiveEdge(scrollView)
@@ -80,45 +81,5 @@ extension EventTableView.Coordinator {
                 return false
             }
             return visibleBottom < previousVisibleBottom - 2
-        }
-
-        func value(for column: String, summary: MacFSWEventRowSummary?) -> String {
-            guard let summary else {
-                return column == "target" ? "Loading..." : "..."
-            }
-            return switch column {
-            case "time":
-                format(timestampNS: summary.timestampNS)
-            case "process":
-                summary.processName
-            case "pid":
-                "\(summary.pid)"
-            case "target":
-                summary.targetPath
-            case "details":
-                summary.detailSummary
-            case "signing":
-                summary.signingSummary
-            default:
-                ""
-            }
-        }
-
-        func font(for column: String) -> NSFont {
-            switch column {
-            case "time", "pid":
-                .monospacedSystemFont(ofSize: 12, weight: .regular)
-            default:
-                .systemFont(ofSize: 12)
-            }
-        }
-
-        func textColor(for column: String, summary: MacFSWEventRowSummary?) -> NSColor {
-            summary == nil ? .secondaryLabelColor : .labelColor
-        }
-
-        func format(timestampNS: UInt64) -> String {
-            let date = Date(timeIntervalSince1970: TimeInterval(timestampNS) / 1_000_000_000)
-            return date.formatted(.dateTime.hour().minute().second().secondFraction(.fractional(3)))
         }
 }

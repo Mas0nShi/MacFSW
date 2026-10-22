@@ -37,6 +37,37 @@ extension EventTableView.Coordinator: NSMenuDelegate {
     }
 }
 
+extension EventTableView.Coordinator: NSMenuItemValidation {
+    /// The header's menu: one checkable item per column.
+    func makeColumnMenu() -> NSMenu {
+        let menu = NSMenu()
+        for column in EventTableColumn.allCases where column != .path {
+            let item = NSMenuItem(title: column.title, action: #selector(toggleColumn(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = column.rawValue
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc func toggleColumn(_ item: NSMenuItem) {
+        guard let identifier = item.representedObject as? String,
+              let column = tableView?.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier(identifier)) else {
+            return
+        }
+        column.isHidden.toggle()
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleColumn(_:)),
+           let identifier = item.representedObject as? String,
+           let column = tableView?.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier(identifier)) {
+            item.state = column.isHidden ? .off : .on
+        }
+        return true
+    }
+}
+
 private final class RowActionPayload: NSObject {
     let action: EventRowAction
     let row: MacFSWEventRowSummary
