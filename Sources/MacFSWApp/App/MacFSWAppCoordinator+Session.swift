@@ -29,6 +29,12 @@ extension MacFSWAppCoordinator {
         guard panel.runModal() == .OK, let url = panel.url else {
             return
         }
+        openSession(at: url)
+    }
+
+    /// Opens a saved session from the panel, Finder, the Dock, or a drop.
+    func openSession(at url: URL) {
+        log.record(.info, "Opening session \(url.lastPathComponent).", category: "Session")
         Task {
             await replaceSession(followMode: .paused) {
                 try await session.open(url)
@@ -73,7 +79,7 @@ extension MacFSWAppCoordinator {
         }
     }
 
-    private static let sessionContentType = UTType(filenameExtension: MacFSWSessionArchive.nativeExtension) ?? .data
+    static let sessionContentType = UTType(exportedAs: "com.mas0n.macfsw-session")
 
     private func replaceSession(followMode: MacFSWFollowMode, _ replace: () async throws -> Void) async {
         monitor.cancelAllWork()

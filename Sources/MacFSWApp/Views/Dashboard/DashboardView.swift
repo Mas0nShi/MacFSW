@@ -1,4 +1,5 @@
 import AppKit
+import MacFSWCore
 import SwiftUI
 
 struct DashboardView: View {
@@ -40,6 +41,13 @@ struct DashboardView: View {
             }
         }
         .animation(.easeInOut(duration: 0.16), value: model.selectedPage)
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.last(where: { $0.pathExtension == MacFSWSessionArchive.nativeExtension }) else {
+                return false
+            }
+            model.openSession(at: url)
+            return true
+        }
     }
 
     private var clampedInspectorWidth: Double {
