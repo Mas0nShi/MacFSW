@@ -193,7 +193,7 @@ extension MacFSWSQLiteEventStore {
         let compiled = MacFSWSQLQueryCompiler.compile(query)
         var arguments = compiled.arguments
         arguments.append(MacFSWSQLValue(limit > 0 ? limit : -1))
-        arguments.append(MacFSWSQLValue(max(0, offset)))
+        arguments.append(MacFSWSQLValue(offset))
         let sql = """
         SELECT *
         FROM events

@@ -6,6 +6,6 @@ import Foundation
 /// caption those budgets in familiar units.
 public enum MacFSWTokenEstimator {
     public static func estimatedTokens(forCharacters count: Int) -> Int {
-        max(0, count) / 4
+        count / 4
     }
 }

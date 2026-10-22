@@ -49,9 +49,9 @@ public struct MacFSWCaptureConfig: Codable, Equatable, Sendable {
         self.includePaths = includePaths
         self.excludePaths = excludePaths
         self.excludedProcessNames = excludedProcessNames
-        self.batchSize = max(1, batchSize)
-        self.batchIntervalMS = max(10, batchIntervalMS)
-        self.maxCaptureDurationSeconds = max(1, maxCaptureDurationSeconds)
+        self.batchSize = batchSize
+        self.batchIntervalMS = batchIntervalMS
+        self.maxCaptureDurationSeconds = maxCaptureDurationSeconds
     }
 
     public static func defaultEventTypes(for profile: MacFSWCaptureProfile) -> [MacFSWEventType] {

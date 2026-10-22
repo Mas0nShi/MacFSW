@@ -521,7 +521,7 @@ final class MacFSWCoreTests: XCTestCase {
         try Data("{\"events\":[]}".utf8).write(to: url)
 
         XCTAssertThrowsError(try MacFSWSessionArchive.openSessionStore(from: url)) { error in
-            XCTAssertTrue(error is MacFSWArchiveError)
+            XCTAssertTrue(error is MacFSWArchiveError, "\(error)")
         }
     }
 

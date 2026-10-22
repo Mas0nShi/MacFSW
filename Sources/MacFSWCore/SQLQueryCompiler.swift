@@ -69,20 +69,13 @@ enum MacFSWSQLQueryCompiler {
     }
 
     static func visibleWindow(totalCount: Int, limit: Int, requestedRange: Range<Int>) -> (offset: Int, limit: Int) {
-        let visibleCount = visibleCount(totalCount: totalCount, limit: limit)
+        let visibleCount = limit > 0 ? min(totalCount, limit) : totalCount
         let windowStart = max(0, totalCount - visibleCount)
         let lowerBound = max(0, min(visibleCount, requestedRange.lowerBound))
         let upperBound = max(lowerBound, min(visibleCount, requestedRange.upperBound))
         return (windowStart + lowerBound, upperBound - lowerBound)
     }
 
-    static func visibleCount(totalCount: Int, limit: Int) -> Int {
-        let totalCount = max(0, totalCount)
-        guard limit > 0 else {
-            return totalCount
-        }
-        return min(totalCount, limit)
-    }
 
     static func orderClause(_ sortOrder: MacFSWEventSortOrder) -> String {
         switch sortOrder {

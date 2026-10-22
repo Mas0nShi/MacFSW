@@ -50,12 +50,12 @@ public struct MacFSWLLMSettings: Codable, Equatable, Sendable {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
-        self.maxEvents = max(1, maxEvents)
-        self.tokenBudget = max(1, tokenBudget)
-        self.timeoutSeconds = max(1, timeoutSeconds)
+        self.maxEvents = maxEvents
+        self.tokenBudget = tokenBudget
+        self.timeoutSeconds = timeoutSeconds
         self.streamResponses = streamResponses
         self.outputLanguage = outputLanguage
-        self.promptEventCharacterBudget = max(2_000, promptEventCharacterBudget)
+        self.promptEventCharacterBudget = promptEventCharacterBudget
     }
 
     public init(from decoder: Decoder) throws {

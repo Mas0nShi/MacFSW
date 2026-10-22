@@ -144,7 +144,7 @@ extension MacFSWSQLiteEventStore {
 
     static func hasCurrentSchema(_ dbQueue: DatabaseQueue) throws -> Bool {
         try dbQueue.read { db in
-            guard try db.tableExists("grdb_migrations"), try db.tableExists("events"), try db.tableExists("session") else {
+            guard try db.tableExists("grdb_migrations") else {
                 return false
             }
             let applied = try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations")

@@ -68,10 +68,14 @@ public actor MacFSWSQLiteEventStore {
             try Self.ensureSession(session, dbQueue: dbQueue)
         case .readOnly:
             isReadOnly = true
-            try Self.validateSQLiteHeader(at: url)
             configuration.readonly = true
-            dbQueue = try DatabaseQueue(path: url.path, configuration: configuration)
-            guard try Self.hasCurrentSchema(dbQueue) else {
+            do {
+                dbQueue = try DatabaseQueue(path: url.path, configuration: configuration)
+                guard try Self.hasCurrentSchema(dbQueue) else {
+                    throw MacFSWSQLiteStoreError.unsupportedFormat(url)
+                }
+            } catch let error as DatabaseError where error.resultCode == .SQLITE_NOTADB {
+                // Not an SQLite file at all.
                 throw MacFSWSQLiteStoreError.unsupportedFormat(url)
             }
         }
@@ -314,7 +318,7 @@ public actor MacFSWSQLiteEventStore {
 
     private static func readNextSequence(_ db: Database) throws -> UInt64 {
         let maxSequence = try Int64.fetchOne(db, sql: "SELECT MAX(sequence) FROM events") ?? 0
-        return UInt64(max(0, maxSequence)) + 1
+        return UInt64(maxSequence) + 1
     }
 
     private static func ensureSession(_ session: MacFSWResearchSession, dbQueue: DatabaseQueue) throws {
@@ -344,16 +348,6 @@ public actor MacFSWSQLiteEventStore {
                     String(decoding: try JSONEncoder.macfsw.encode(session.savedQueries), as: UTF8.self),
                 ]
             )
-        }
-    }
-
-    private static func validateSQLiteHeader(at url: URL) throws {
-        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), data.count >= 16 else {
-            throw MacFSWSQLiteStoreError.unsupportedFormat(url)
-        }
-        let header = String(decoding: data.prefix(16), as: UTF8.self)
-        guard header == "SQLite format 3\u{0000}" else {
-            throw MacFSWSQLiteStoreError.unsupportedFormat(url)
         }
     }
 }

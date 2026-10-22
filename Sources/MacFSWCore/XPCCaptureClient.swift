@@ -13,7 +13,7 @@ public final class MacFSWXPCCaptureClient: MacFSWCaptureClient, @unchecked Senda
 
     public init(serviceName: String = MacFSWXPCDefaults.serviceName, healthTimeoutSeconds: UInt64 = 8) {
         self.serviceName = serviceName
-        self.healthTimeoutSeconds = max(1, healthTimeoutSeconds)
+        self.healthTimeoutSeconds = healthTimeoutSeconds
     }
 
     public func health() async throws -> MacFSWCaptureHealth {
