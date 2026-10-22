@@ -18,6 +18,7 @@ struct EventTableView: NSViewRepresentable {
     var onUserSelected: (Int?, UUID?) -> Void
     var onClearSelection: () -> Void
     var onLiveEdgeChanged: (Bool) -> Void
+    var onRowAction: (EventRowAction, MacFSWEventRowSummary) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -59,6 +60,7 @@ struct EventTableView: NSViewRepresentable {
         tableView.onClearSelection = { [weak coordinator = context.coordinator] in
             coordinator?.scheduleClearSelection()
         }
+        tableView.menu = context.coordinator.makeContextMenu()
         tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
 
         addColumn("time", "Time", 148, to: tableView)
@@ -92,6 +94,7 @@ struct EventTableView: NSViewRepresentable {
         context.coordinator.onUserSelected = onUserSelected
         context.coordinator.onClearSelection = onClearSelection
         context.coordinator.onLiveEdgeChanged = onLiveEdgeChanged
+        context.coordinator.onRowAction = onRowAction
         guard let tableView = context.coordinator.tableView else {
             return
         }
@@ -222,6 +225,7 @@ struct EventTableView: NSViewRepresentable {
         var onUserSelected: (Int?, UUID?) -> Void
         var onClearSelection: () -> Void
         var onLiveEdgeChanged: (Bool) -> Void
+        var onRowAction: (EventRowAction, MacFSWEventRowSummary) -> Void = { _, _ in }
         weak var tableView: NSTableView?
         var isApplyingSwiftUISelection = false
         var isProgrammaticScroll = false

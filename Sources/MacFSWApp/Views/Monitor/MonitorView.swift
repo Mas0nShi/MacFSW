@@ -35,6 +35,9 @@ struct MonitorView: View {
                 },
                 onLiveEdgeChanged: { isAtLiveEdge in
                     model.monitor.liveEdgeChanged(isAtLiveEdge)
+                },
+                onRowAction: { action, row in
+                    model.monitor.perform(action, on: row)
                 }
             )
             StatusBar()

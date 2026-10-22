@@ -99,6 +99,25 @@ final class MonitorStoreTests: XCTestCase {
         XCTAssertNil(monitor.pinnedPID)
     }
 
+    func testRowActionsNarrowTheQuery() async throws {
+        let row = MacFSWEventRowSummary(event: Self.events(.write, count: 1)[0])
+        monitor.queryText = "op:write"
+
+        monitor.perform(.showOnlyFolder, on: row)
+        XCTAssertEqual(monitor.queryText, "op:write path:/tmp")
+        monitor.perform(.hideProcess, on: row)
+        XCTAssertEqual(monitor.queryText, "op:write path:/tmp NOT process=tool")
+        monitor.perform(.showOnlyProcess, on: row)
+        XCTAssertEqual(monitor.queryText, "op:write path:/tmp NOT process=tool pid:9")
+
+        let unrepresentable = MacFSWEventRowSummary(event: MacFSWFileEvent(
+            eventType: .write,
+            process: MacFSWProcessIdentity(pid: 1, auditToken: "t", executablePath: "/bin/t", processName: "t"),
+            targetPath: "/tmp/a,b/file"
+        ))
+        XCTAssertFalse(EventRowAction.showOnlyFolder.isAvailable(for: unrepresentable))
+    }
+
     private func waitUntil(timeout: Duration = .seconds(2), _ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + timeout
         while !condition() {
