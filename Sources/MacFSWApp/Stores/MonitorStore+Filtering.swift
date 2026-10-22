@@ -331,13 +331,8 @@ extension MonitorStore {
         let store = eventStore
         selectedEventLoadTask = Task { [weak self] in
             do {
-                guard !Task.isCancelled else {
-                    return
-                }
+                // Whoever cancels this load also bumps the load generation.
                 let event = try await store.event(id: eventID)
-                guard !Task.isCancelled else {
-                    return
-                }
                 guard let self,
                       self.queryGeneration == generation,
                       self.selectedEventLoadGeneration == loadGeneration,
@@ -368,16 +363,10 @@ extension MonitorStore {
         let loadGeneration = nextSelectedEventLoadGeneration()
         selectedEventLoadTask = Task { [weak self] in
             do {
-                guard !Task.isCancelled else {
-                    return
-                }
                 let event = try await store.event(
                     in: snapshot,
                     visibleRow: row
                 )
-                guard !Task.isCancelled else {
-                    return
-                }
                 guard let self,
                       self.queryGeneration == generation,
                       self.selectedEventLoadGeneration == loadGeneration,
