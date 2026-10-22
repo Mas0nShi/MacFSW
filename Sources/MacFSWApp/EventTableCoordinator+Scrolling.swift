@@ -5,7 +5,7 @@ import QuartzCore
 /// Following the newest row.
 ///
 /// At readable rates a display link glides the view toward the bottom,
-/// at most a couple of rows per frame, so new rows enter a few at a time.
+/// at most a few rows per frame (~360 rows/s), so new rows enter a few at a time.
 /// When events outrun that (the backlog exceeds a screen), gliding would
 /// rebuild a screenful of cells every frame for text nobody can read, so
 /// the view instead jumps to the newest row a few times per second.
@@ -16,7 +16,7 @@ extension EventTableView.Coordinator {
     /// Seconds for a glide to close ~63% of the distance to the newest row.
     private static let followTimeConstant: CFTimeInterval = 0.1
     /// Fastest glide, in rows per frame.
-    private static let maxGlideRows: CGFloat = 2
+    private static let maxGlideRows: CGFloat = 6
     /// Minimum time between jumps when events outrun the glide.
     private static let jumpInterval: CFTimeInterval = 0.25
 
