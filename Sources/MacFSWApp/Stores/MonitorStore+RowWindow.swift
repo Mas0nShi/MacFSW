@@ -23,13 +23,6 @@ extension MonitorStore {
         loadPages(for: expandedLower..<expandedUpper)
     }
 
-    func liveEdgeChanged(_ isAtLiveEdge: Bool) {
-        isViewingLiveEdge = isAtLiveEdge
-        if isAtLiveEdge, followMode == .live {
-            unseenEventCount = 0
-        }
-    }
-
     func preloadRowsForCurrentViewport() {
         guard visibleEventCount > 0 else {
             return

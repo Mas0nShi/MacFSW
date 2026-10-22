@@ -70,15 +70,29 @@ final class MonitorStoreTests: XCTestCase {
         XCTAssertEqual(monitor.unseenEventCount, 0)
     }
 
-    func testPausedViewCountsUnseenEventsWithoutRendering() async throws {
+    func testPausedViewKeepsAppendingAndCountsUnseenEvents() async throws {
         await monitor.refreshFilteredEvents()
-        monitor.followMode = .paused
+        monitor.pauseFollowing()
 
         let appended = try await eventStore.appendReturningEvents(Self.events(.write, count: 3))
         monitor.ingest(appended.events)
+        try await waitUntil { self.monitor.visibleEventCount == 3 }
 
         XCTAssertEqual(monitor.unseenEventCount, 3)
-        XCTAssertEqual(monitor.visibleEventCount, 0)
+        XCTAssertEqual(monitor.followMode, .paused)
+
+        monitor.jumpToLive()
+        XCTAssertEqual(monitor.followMode, .live)
+        XCTAssertEqual(monitor.unseenEventCount, 0)
+    }
+
+    func testSelectingARowStopsFollowing() async throws {
+        _ = try await eventStore.appendReturningEvents(Self.events(.write, count: 3))
+        await monitor.refreshFilteredEvents()
+        XCTAssertEqual(monitor.followMode, .live)
+
+        monitor.prepareEventSelection(row: 1)
+        XCTAssertEqual(monitor.followMode, .paused)
     }
 
     func testPinningAProcessShowsUpInTheQueryAndFilters() async throws {

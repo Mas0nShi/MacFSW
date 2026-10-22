@@ -28,7 +28,6 @@ final class MonitorStore {
     var queryText = ""
     var followMode: MacFSWFollowMode = .live
     var unseenEventCount = 0
-    var isViewingLiveEdge = true
     var scrollToLiveSerial = 0
     var selectionResetSerial = 0
     var lastUpdatedAt: Date?
@@ -164,7 +163,6 @@ final class MonitorStore {
         operationSummaries = []
         followMode = newFollowMode
         unseenEventCount = 0
-        isViewingLiveEdge = true
         scrollToLiveSerial += 1
         selectionResetSerial += 1
         lastUpdatedAt = Date()
@@ -186,15 +184,11 @@ final class MonitorStore {
     }
 
     func prepareForLiveCapture() {
-        followMode = .live
-        unseenEventCount = 0
-        isViewingLiveEdge = true
+        resumeFollowing()
         scrollToLiveSerial += 1
     }
 
     func captureStopped() {
-        followMode = .paused
         unseenEventCount = 0
-        isViewingLiveEdge = true
     }
 }

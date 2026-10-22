@@ -163,7 +163,6 @@ extension MonitorStore {
 
         if followMode == .live {
             unseenEventCount = 0
-            isViewingLiveEdge = true
         }
         isApplyingFilter = false
         lastUpdatedAt = Date()
@@ -252,19 +251,11 @@ extension MonitorStore {
         Task { await refreshFilteredEvents() }
     }
 
-    func pauseLiveView() {
-        guard followMode == .live else {
-            return
-        }
-        invalidateLiveRender()
-        followMode = .paused
-    }
-
     func prepareEventSelection(row: Int) {
         guard row >= 0, row < visibleEventCount else {
             return
         }
-        pauseLiveView()
+        pauseFollowing()
     }
 
     func invalidateLiveRender() {
@@ -276,7 +267,7 @@ extension MonitorStore {
     func selectEvent(_ eventID: UUID?, row: Int? = nil) {
         selectedRow = row
         if row != nil || eventID != nil {
-            pauseLiveView()
+            pauseFollowing()
         }
         guard let eventID else {
             selectedEventID = nil

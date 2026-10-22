@@ -33,8 +33,8 @@ struct MonitorView: View {
                 onClearSelection: {
                     model.monitor.clearEventSelection()
                 },
-                onLiveEdgeChanged: { isAtLiveEdge in
-                    model.monitor.liveEdgeChanged(isAtLiveEdge)
+                onFollowChanged: { following in
+                    model.monitor.userChangedFollowing(following)
                 },
                 onRowAction: { action, row in
                     model.monitor.perform(action, on: row)

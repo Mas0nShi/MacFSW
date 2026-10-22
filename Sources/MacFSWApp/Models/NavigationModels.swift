@@ -1,25 +1,9 @@
 import SwiftUI
 
+/// Whether the monitor scrolls to new events as they arrive.
 enum MacFSWFollowMode: String, Equatable {
     case live
     case paused
-    case frozen
-
-    var title: String {
-        switch self {
-        case .live: "Live"
-        case .paused: "Paused"
-        case .frozen: "Frozen"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .live: "dot.radiowaves.left.and.right"
-        case .paused: "pause.circle"
-        case .frozen: "snowflake"
-        }
-    }
 }
 
 enum MacFSWNavigationPage: String, CaseIterable, Identifiable, Sendable {

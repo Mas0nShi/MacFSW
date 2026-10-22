@@ -81,8 +81,9 @@ struct StatusBar: View {
                     .foregroundStyle(tableRefreshColor)
                     .frame(width: 68, alignment: .leading)
             }
-            if model.session.captureState == .recording, model.monitor.followMode == .live, !model.monitor.isViewingLiveEdge {
-                Label("Viewing history", systemImage: "arrow.up")
+            if model.monitor.followMode == .paused, model.monitor.unseenEventCount > 0 {
+                Text("\(model.monitor.unseenEventCount) new below")
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
 

@@ -40,6 +40,7 @@ extension EventTableView.Coordinator {
                 return
             }
             lockCurrentUserSelection(row: row)
+            setFollowing(false, notify: false)
             onUserWillSelect(row)
         }
 
@@ -196,81 +197,13 @@ extension EventTableView.Coordinator {
                 name: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView
             )
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(userWillScroll(_:)),
-                name: NSScrollView.willStartLiveScrollNotification,
-                object: scrollView
-            )
-        }
-
-        /// The user takes over: stop pulling the view toward the live edge.
-        @objc func userWillScroll(_ notification: Notification) {
-            guard isAnimatingToLive, let clipView = observedClipView else {
-                return
-            }
-            isAnimatingToLive = false
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0
-                clipView.animator().setBoundsOrigin(clipView.bounds.origin)
-            }
+            lastClipBounds = scrollView.contentView.bounds
         }
 
         func stopObserving() {
             NotificationCenter.default.removeObserver(self)
             observedClipView = nil
-        }
-
-        /// Brings the newest row into view. Live follow animates the scroll
-        /// over about one render interval, so batches arriving every
-        /// ~140 ms read as a steady scroll instead of a jump per batch.
-        func scrollToLive(animated: Bool = false) {
-            guard let tableView, rowCount > 0, let scrollView = tableView.enclosingScrollView else {
-                return
-            }
-            let clipView = scrollView.contentView
-            let bottom = tableView.rect(ofRow: rowCount - 1).maxY
-            let target = clipView.constrainBoundsRect(NSRect(
-                origin: NSPoint(x: clipView.bounds.origin.x, y: bottom - clipView.bounds.height),
-                size: clipView.bounds.size
-            )).origin
-
-            guard animated else {
-                isProgrammaticScroll = true
-                isAnimatingToLive = false
-                clipView.setBoundsOrigin(target)
-                scrollView.reflectScrolledClipView(clipView)
-                didFinishScrollToLive()
-                NSObject.cancelPreviousPerformRequests(
-                    withTarget: self,
-                    selector: #selector(clearProgrammaticScroll),
-                    object: nil
-                )
-                perform(#selector(clearProgrammaticScroll), with: nil, afterDelay: 0)
-                return
-            }
-
-            isAnimatingToLive = true
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.14
-                context.timingFunction = CAMediaTimingFunction(name: .linear)
-                clipView.animator().setBoundsOrigin(target)
-            } completionHandler: { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self, self.isAnimatingToLive else {
-                        return
-                    }
-                    self.isAnimatingToLive = false
-                    scrollView.reflectScrolledClipView(clipView)
-                    self.didFinishScrollToLive()
-                }
-            }
-        }
-
-        private func didFinishScrollToLive() {
-            lastObservedVisibleBottom = tableView?.enclosingScrollView?.contentView.bounds.maxY
-            requestVisibleRows()
-            reportLiveEdgeIfNeeded(force: true)
+            stopFollowLink()
         }
 
         func requestVisibleRows() {

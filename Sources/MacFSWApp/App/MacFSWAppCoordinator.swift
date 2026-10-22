@@ -191,7 +191,7 @@ final class MacFSWAppCoordinator {
 
     var shouldShowJumpToLive: Bool {
         session.captureState == .recording
-            && ((monitor.followMode != .live && monitor.unseenEventCount > 0) || !monitor.isViewingLiveEdge)
+            && monitor.followMode == .paused
     }
 
     var selectedAnalysisProcess: MacFSWProcessSummary? {

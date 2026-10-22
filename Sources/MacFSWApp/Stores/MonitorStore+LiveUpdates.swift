@@ -2,39 +2,33 @@ import Foundation
 import MacFSWCore
 
 extension MonitorStore {
+    /// Drops the selection and follows the newest events again.
     func jumpToLive() {
-        invalidateLiveRender()
-        let visibleMutationCount = pendingVisibleMatchCount
-        let visibleRowSummaries = pendingVisibleRowSummaries
-        pendingVisibleMatchCount = 0
-        pendingVisibleRowSummaries.removeAll(keepingCapacity: true)
-        followMode = .live
-        unseenEventCount = 0
-        isViewingLiveEdge = true
         cancelSelectedEventLoad()
         selectedEventID = nil
         selectedRow = nil
         selectedEvent = nil
         selectedEventIsLoading = false
         selectionResetSerial += 1
-        Task { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
-            if self.activeSnapshot == nil {
-                await self.refreshFilteredEvents()
-            } else if visibleMutationCount > 0 {
-                await self.refreshVisibleRowsAfterStoreChange(
-                    visibleMutationCount: visibleMutationCount,
-                    appendedSummaries: visibleRowSummaries,
-                    renderGeneration: self.liveRenderGeneration
-                )
-            } else {
-                self.preloadRowsForCurrentViewport()
-                self.lastUpdatedAt = Date()
-            }
-            self.scrollToLiveSerial += 1
-        }
+        resumeFollowing()
+        preloadRowsForCurrentViewport()
+        scrollToLiveSerial += 1
+    }
+
+    /// Stops scrolling to new events. Rows keep arriving below; appending
+    /// at the tail never moves what the user is looking at.
+    func pauseFollowing() {
+        followMode = .paused
+    }
+
+    func resumeFollowing() {
+        followMode = .live
+        unseenEventCount = 0
+    }
+
+    /// The table reports the user scrolling away from, or back to, the newest row.
+    func userChangedFollowing(_ following: Bool) {
+        following ? resumeFollowing() : pauseFollowing()
     }
 
     /// Folds newly captured events into the live view: counts the ones the
@@ -72,7 +66,7 @@ extension MonitorStore {
     func applyScheduledRender() async {
         defer {
             renderTask = nil
-            if !Task.isCancelled, followMode == .live, pendingVisibleMatchCount > 0 {
+            if !Task.isCancelled, pendingVisibleMatchCount > 0 {
                 scheduleRenderRefresh(immediate: true)
             }
         }
@@ -80,11 +74,6 @@ extension MonitorStore {
         guard !isApplyingFilter else {
             pendingVisibleMatchCount = 0
             pendingVisibleRowSummaries.removeAll(keepingCapacity: true)
-            lastUpdatedAt = Date()
-            return
-        }
-
-        guard followMode == .live else {
             lastUpdatedAt = Date()
             return
         }
@@ -110,7 +99,7 @@ extension MonitorStore {
         appendedSummaries: [MacFSWEventRowSummary],
         renderGeneration: Int
     ) async {
-        guard followMode == .live, liveRenderGeneration == renderGeneration else {
+        guard liveRenderGeneration == renderGeneration else {
             requeueVisibleRender(
                 visibleMutationCount: visibleMutationCount,
                 appendedSummaries: appendedSummaries
@@ -126,7 +115,7 @@ extension MonitorStore {
             rows: appendedSummaries,
             limit: activeQuery.limit
         )
-        guard followMode == .live, liveRenderGeneration == renderGeneration else {
+        guard liveRenderGeneration == renderGeneration else {
             retireSnapshot(updatedSnapshot)
             requeueVisibleRender(
                 visibleMutationCount: visibleMutationCount,
@@ -150,10 +139,6 @@ extension MonitorStore {
         if count > previousCount, !didCacheAppendedRows {
             invalidateRowPages(for: previousCount..<count)
         }
-
-        if followMode == .live, isViewingLiveEdge {
-            unseenEventCount = 0
-        }
         preloadRowsForCurrentViewport()
         lastUpdatedAt = Date()
     }
@@ -169,9 +154,6 @@ extension MonitorStore {
         pendingVisibleMatchCount += visibleMutationCount
         if !appendedSummaries.isEmpty {
             pendingVisibleRowSummaries.insert(contentsOf: appendedSummaries, at: 0)
-        }
-        if followMode != .live {
-            unseenEventCount += visibleMutationCount
         }
         lastUpdatedAt = Date()
     }
