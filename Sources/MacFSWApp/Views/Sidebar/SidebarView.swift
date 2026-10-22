@@ -6,13 +6,6 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarPageSwitcher()
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
-            .padding(.bottom, 10)
-
-            Divider()
-
             ProcessFilterPane()
                 .frame(maxHeight: .infinity)
 
@@ -46,68 +39,6 @@ private extension SidebarView {
             || status.isRunningOutdatedExtension
             || status.completedUpdate != nil
             || model.session.captureHealth.fullDiskAccessHint
-    }
-}
-
-struct SidebarPageSwitcher: View {
-    @Environment(MacFSWAppCoordinator.self) private var model
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(MacFSWNavigationPage.allCases) { page in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.16)) {
-                        model.selectedPage = page
-                    }
-                } label: {
-                    SidebarPageSwitcherItem(
-                        page: page,
-                        isSelected: model.selectedPage == page
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .frame(height: 34)
-        .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-struct SidebarPageSwitcherItem: View {
-    let page: MacFSWNavigationPage
-    let isSelected: Bool
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: page.symbolName)
-                .font(.system(size: 12, weight: .medium))
-            Text(page.title)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.86)
-            if page.isBeta {
-                MacFSWBetaBadge()
-            }
-        }
-        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(background, in: RoundedRectangle(cornerRadius: 6))
-        .contentShape(RoundedRectangle(cornerRadius: 6))
-        .onHover { isHovering = $0 }
-        .animation(.easeInOut(duration: 0.14), value: isHovering)
-        .animation(.easeInOut(duration: 0.14), value: isSelected)
-    }
-
-    private var background: Color {
-        if isSelected {
-            return Color.accentColor.opacity(0.16)
-        }
-        if isHovering {
-            return Color.primary.opacity(0.07)
-        }
-        return .clear
     }
 }
 

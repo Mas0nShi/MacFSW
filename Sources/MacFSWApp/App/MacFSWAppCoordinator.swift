@@ -153,6 +153,42 @@ final class MacFSWAppCoordinator {
         }
     }
 
+    var recordButtonTitle: String {
+        if session.captureState == .recording {
+            return "Stop"
+        }
+        if session.captureHealth.fullDiskAccessHint {
+            return "Open Full Disk Access"
+        }
+        return extensionStatus.installState == .ready ? "Record" : "Enable Extension"
+    }
+
+    var recordButtonSymbol: String {
+        if session.captureState == .recording {
+            return "stop.circle.fill"
+        }
+        if session.captureHealth.fullDiskAccessHint {
+            return "lock.shield"
+        }
+        return extensionStatus.installState == .ready ? "record.circle" : "puzzlepiece.extension"
+    }
+
+    /// Where the session lives and whether it is safe, under the title.
+    var windowSubtitle: String {
+        let events = session.captureStats.deliveredEvents
+        let count = events == 1 ? "1 event" : "\(events.formatted()) events"
+        if session.captureState == .recording {
+            return "Recording · \(count)"
+        }
+        if let file = session.fileURL {
+            return "\(file.lastPathComponent) · \(count) · Read-only"
+        }
+        if session.hasUnsavedEvents {
+            return "\(count) · Not saved"
+        }
+        return events == 0 ? "No events" : count
+    }
+
     var shouldShowJumpToLive: Bool {
         session.captureState == .recording
             && ((monitor.followMode != .live && monitor.unseenEventCount > 0) || !monitor.isViewingLiveEdge)

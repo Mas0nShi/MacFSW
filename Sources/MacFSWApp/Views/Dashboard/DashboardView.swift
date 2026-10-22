@@ -41,6 +41,9 @@ struct DashboardView: View {
             }
         }
         .animation(.easeInOut(duration: 0.16), value: model.selectedPage)
+        .toolbar { MainToolbar(model: model) }
+        .navigationTitle(model.session.research.name)
+        .navigationSubtitle(model.windowSubtitle)
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.last(where: { $0.pathExtension == MacFSWSessionArchive.nativeExtension }) else {
                 return false

@@ -86,18 +86,29 @@ final class UISnapshotTests: XCTestCase {
 
     private func snapshot(_ model: MacFSWAppCoordinator, named name: String) async throws {
         let size = NSSize(width: 1440, height: 860)
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
         let host = NSHostingView(rootView: DashboardView().environment(model).frame(width: size.width, height: size.height))
+        // Bridges the SwiftUI toolbar and title onto this window, as the
+        // WindowGroup scene does in the app.
+        host.sceneBridgingOptions = [.toolbars, .title]
         window.isReleasedWhenClosed = false
+        window.toolbarStyle = .unified
         window.contentView = host
         window.layoutIfNeeded()
         try await settle()
-        host.layoutSubtreeIfNeeded()
-        let bounds = host.bounds
-        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: bounds) else {
+        // The frame view includes the title bar and toolbar.
+        let frameView = try XCTUnwrap(host.superview)
+        frameView.layoutSubtreeIfNeeded()
+        let bounds = frameView.bounds
+        guard let bitmap = frameView.bitmapImageRepForCachingDisplay(in: bounds) else {
             return XCTFail("no bitmap")
         }
-        host.cacheDisplay(in: bounds, to: bitmap)
+        frameView.cacheDisplay(in: bounds, to: bitmap)
         let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
         try png.write(to: outputDirectory.appendingPathComponent("\(name).png"))
         window.close()

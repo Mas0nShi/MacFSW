@@ -13,6 +13,10 @@ final class SessionStore {
     private(set) var captureStats = MacFSWCaptureStats()
     /// Sessions opened from a file are read-only: no recording, no clearing.
     private(set) var isReadOnly = false
+    /// The saved file this session was opened from; nil for a recording.
+    private(set) var fileURL: URL?
+    /// Events were recorded since the session started or was last saved.
+    private(set) var hasUnsavedEvents = false
 
     @ObservationIgnored
     private(set) var capture: MacFSWCaptureSession
@@ -62,20 +66,24 @@ final class SessionStore {
 
     func startNew(_ newResearch: MacFSWResearchSession) async throws {
         try await replace(with: .temporary(for: newResearch, client: client), research: newResearch, stats: MacFSWCaptureStats())
+        fileURL = nil
     }
 
     func open(_ url: URL) async throws {
         let (opened, metadata) = try await MacFSWCaptureSession.open(url, client: client)
         try await replace(with: opened, research: metadata, stats: await opened.stats)
+        fileURL = url
     }
 
     func save(to url: URL) async throws {
         try await capture.save(research, to: url)
+        hasUnsavedEvents = false
     }
 
     func clearEvents() async throws {
         try await capture.clear()
         captureStats = MacFSWCaptureStats()
+        hasUnsavedEvents = false
     }
 
     func refreshHealth() async throws -> MacFSWCaptureHealth {
@@ -116,6 +124,7 @@ final class SessionStore {
         isReadOnly = newCapture.store.isReadOnly
         captureStats = stats
         captureState = .idle
+        hasUnsavedEvents = false
         try await oldCapture.close()
     }
 
@@ -132,6 +141,7 @@ final class SessionStore {
         switch update {
         case .appended(let events, let stats):
             scheduleStatsPublish(stats)
+            hasUnsavedEvents = true
             onEvents(events)
         case .stateChanged(let state, let error):
             captureState = state

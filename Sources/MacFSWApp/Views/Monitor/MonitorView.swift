@@ -152,32 +152,6 @@ struct MonitorCommandBar: View {
             }
             .animation(.easeInOut(duration: 0.14), value: model.monitor.isQuerySuggestionListVisible)
             .animation(.easeInOut(duration: 0.14), value: model.monitor.queryDiagnosticSummary == nil)
-
-            Button {
-                model.recordButtonTapped()
-            } label: {
-                Label(recordButtonTitle, systemImage: recordButtonSymbol)
-            }
-            .keyboardShortcut("r")
-            .disabled(model.session.isReadOnly || model.session.captureState == .stopping)
-            .help(model.session.isReadOnly ? Self.readOnlyHelp : "")
-
-            if model.shouldShowJumpToLive {
-                Button {
-                    model.monitor.jumpToLive()
-                } label: {
-                    Label("Jump to Live", systemImage: "arrow.down.to.line")
-                }
-            }
-
-            Button {
-                model.clearView()
-            } label: {
-                Label("Clear", systemImage: "trash")
-            }
-            .disabled(model.session.isReadOnly || (model.monitor.visibleEventCount == 0 && model.session.captureStats.deliveredEvents == 0))
-            .help(model.session.isReadOnly ? Self.readOnlyHelp : "")
-
         }
         .buttonStyle(.bordered)
         .padding(.horizontal, 12)
@@ -186,28 +160,6 @@ struct MonitorCommandBar: View {
         .overlay(alignment: .bottom) {
             Divider()
         }
-    }
-
-    private static let readOnlyHelp = "Opened sessions are read-only. Start a new session (⌘N) to record."
-
-    private var recordButtonTitle: String {
-        if model.session.captureState == .recording {
-            return "Stop"
-        }
-        if model.session.captureHealth.fullDiskAccessHint {
-            return "Open Full Disk Access"
-        }
-        return model.extensionStatus.installState == .ready ? "Record" : "Enable Extension"
-    }
-
-    private var recordButtonSymbol: String {
-        if model.session.captureState == .recording {
-            return "stop.circle.fill"
-        }
-        if model.session.captureHealth.fullDiskAccessHint {
-            return "lock.shield"
-        }
-        return model.extensionStatus.installState == .ready ? "record.circle" : "puzzlepiece.extension"
     }
 }
 

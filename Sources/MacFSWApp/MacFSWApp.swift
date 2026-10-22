@@ -18,6 +18,7 @@ struct MacFSWApp: App {
                     await coordinator.refreshHealth()
                 }
         }
+        .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Session") {
