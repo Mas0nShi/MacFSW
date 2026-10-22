@@ -209,7 +209,7 @@ enum MacFSWSQLQueryCompiler {
     private static func containsClause(field: MacFSWQueryField, pattern: String) -> MacFSWCompiledSQL {
         switch field {
         case .eventType:
-            return enumClause(columns: ["eventType", "rawEventType"], pattern: pattern)
+            return enumClause(columns: eventTypeColumns(for: pattern), pattern: pattern)
         case .operationClass:
             return enumClause(columns: ["operationClass"], pattern: pattern)
         case .platformBinary:
@@ -241,10 +241,7 @@ enum MacFSWSQLQueryCompiler {
 
         switch field {
         case .eventType:
-            return or([
-                enumEqualityClause(column: "eventType", pattern: pattern),
-                enumEqualityClause(column: "rawEventType", pattern: pattern),
-            ])
+            return or(eventTypeColumns(for: pattern).map { enumEqualityClause(column: $0, pattern: pattern) })
         case .operationClass:
             return enumEqualityClause(column: "operationClass", pattern: pattern)
         case .auditToken:
@@ -288,6 +285,17 @@ enum MacFSWSQLQueryCompiler {
             return falseClause()
         }
         return simple("\(column) \(op) ?", MacFSWSQLValue(number))
+    }
+
+    /// `op:` matches either MacFSW's type name or the raw ES name. The two
+    /// never overlap — raw names are all `ES_EVENT_TYPE_…` — so a known
+    /// MacFSW name only needs the indexed `eventType` column; testing the
+    /// raw name too forced a `lower()` scan of every row.
+    private static func eventTypeColumns(for pattern: String) -> [String] {
+        if pattern.containsWildcardSQL {
+            return ["eventType", "rawEventType"]
+        }
+        return MacFSWEventType(rawValue: pattern.lowercased()) != nil ? ["eventType"] : ["rawEventType"]
     }
 
     private static func enumClause(columns: [String], pattern: String) -> MacFSWCompiledSQL {

@@ -422,3 +422,22 @@ private struct NeverCalledClient: MacFSWCaptureClient {
         throw MacFSWCaptureSessionError.readOnly
     }
 }
+
+final class EventTypeQueryTests: XCTestCase {
+    func testOpMatchesMacFSWAndRawNamesAlike() async throws {
+        let store = try MacFSWSQLiteEventStore.temporary()
+        let process = MacFSWProcessIdentity(pid: 1, auditToken: "a", executablePath: "/bin/t", processName: "t")
+        _ = try await store.appendReturningEvents([
+            MacFSWFileEvent(eventType: .write, process: process, targetPath: "/tmp/w", rawEventType: "ES_EVENT_TYPE_NOTIFY_WRITE"),
+            MacFSWFileEvent(eventType: .unlink, process: process, targetPath: "/tmp/u", rawEventType: "ES_EVENT_TYPE_NOTIFY_UNLINK"),
+        ])
+        for (text, expected) in [
+            ("op:write", 1), ("op:WRITE", 1), ("op:ES_EVENT_TYPE_NOTIFY_WRITE", 1), ("op:es_event_type_notify_write", 1),
+            ("op=write", 1), ("op:write,unlink", 2), ("op:*WRITE*", 1), ("op!=write", 1), ("op:unknown", 0),
+        ] {
+            let count = try await store.count(matching: MacFSWQueryParser.parse(text))
+            XCTAssertEqual(count, expected, text)
+        }
+        try await store.cleanupBackingStore()
+    }
+}
