@@ -159,6 +159,9 @@ final class QueryBenchmark: XCTestCase {
             try? FileManager.default.removeItem(at: url)
         }
         print("BENCH save copy (VACUUM INTO): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        try await store.clear()
+        print("BENCH clear: \(Self.milliseconds(since: t)) ms")
         try await store.cleanupBackingStore()
     }
 

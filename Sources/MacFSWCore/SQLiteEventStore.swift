@@ -166,10 +166,15 @@ public actor MacFSWSQLiteEventStore {
         return MacFSWEventAppendResult(events: sequenced, stats: stats)
     }
 
+    /// Removes every event. Dropping and recreating the tables takes the
+    /// same short time at any size; deleting rows took seconds on a large
+    /// session, mostly updating the full-text index row by row, and held
+    /// up capture writes meanwhile.
     public func clear() async throws {
         try await dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM event_fts")
-            try db.execute(sql: "DELETE FROM events")
+            try db.execute(sql: "DROP TABLE event_fts")
+            try db.execute(sql: "DROP TABLE events")
+            try Self.createEventTables(db)
         }
         resultSnapshots.removeAll(keepingCapacity: true)
         nextSequence = 1

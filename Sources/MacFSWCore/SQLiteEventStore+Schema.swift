@@ -180,67 +180,73 @@ extension MacFSWSQLiteEventStore {
             )
             """)
 
-            try db.execute(sql: """
-            CREATE TABLE IF NOT EXISTS events (
-                id TEXT NOT NULL UNIQUE,
-                sequence INTEGER PRIMARY KEY NOT NULL,
-                timestampNS INTEGER NOT NULL,
-                eventType TEXT NOT NULL,
-                operationClass TEXT NOT NULL,
-                pid INTEGER NOT NULL,
-                pidText TEXT NOT NULL,
-                auditToken TEXT NOT NULL,
-                executablePath TEXT NOT NULL,
-                processName TEXT NOT NULL,
-                signingID TEXT,
-                teamID TEXT,
-                cdhash TEXT,
-                isPlatformBinary INTEGER NOT NULL,
-                isPlatformBinaryText TEXT NOT NULL,
-                appleControlled INTEGER NOT NULL,
-                appleControlledText TEXT NOT NULL,
-                targetPath TEXT NOT NULL,
-                sourcePath TEXT,
-                parameterText TEXT NOT NULL,
-                detailSummary TEXT NOT NULL,
-                parametersJSON TEXT NOT NULL,
-                fileIDText TEXT,
-                flagsText TEXT NOT NULL,
-                flagsHexText TEXT NOT NULL,
-                uid INTEGER NOT NULL,
-                uidText TEXT NOT NULL,
-                gid INTEGER NOT NULL,
-                gidText TEXT NOT NULL,
-                uidGidText TEXT NOT NULL,
-                rawEventType TEXT NOT NULL,
-                rawEventTypeValue INTEGER,
-                rawEventTypeValueText TEXT NOT NULL,
-                rawEventVersion INTEGER NOT NULL,
-                rawEventVersionText TEXT NOT NULL,
-                sequenceText TEXT NOT NULL,
-                timestampText TEXT NOT NULL,
-                mutation INTEGER NOT NULL,
-                mutationText TEXT NOT NULL
-            )
-            """)
-
-            try db.execute(sql: """
-            CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5(
-                any_text,
-                process_text,
-                executable_text,
-                path_text,
-                signing_text,
-                team_text,
-                tokenize = 'unicode61'
-            )
-            """)
-
-            for indexSQL in baseIndexSQL + largeFilterIndexSQL {
-                try db.execute(sql: indexSQL)
-            }
+            try createEventTables(db)
         }
         try migrator.migrate(dbQueue)
+    }
+
+    /// The events table, its full-text index, and the indexes queries rely
+    /// on. Also used by `clear()`, which drops and recreates them.
+    static func createEventTables(_ db: Database) throws {
+        try db.execute(sql: """
+        CREATE TABLE IF NOT EXISTS events (
+            id TEXT NOT NULL UNIQUE,
+            sequence INTEGER PRIMARY KEY NOT NULL,
+            timestampNS INTEGER NOT NULL,
+            eventType TEXT NOT NULL,
+            operationClass TEXT NOT NULL,
+            pid INTEGER NOT NULL,
+            pidText TEXT NOT NULL,
+            auditToken TEXT NOT NULL,
+            executablePath TEXT NOT NULL,
+            processName TEXT NOT NULL,
+            signingID TEXT,
+            teamID TEXT,
+            cdhash TEXT,
+            isPlatformBinary INTEGER NOT NULL,
+            isPlatformBinaryText TEXT NOT NULL,
+            appleControlled INTEGER NOT NULL,
+            appleControlledText TEXT NOT NULL,
+            targetPath TEXT NOT NULL,
+            sourcePath TEXT,
+            parameterText TEXT NOT NULL,
+            detailSummary TEXT NOT NULL,
+            parametersJSON TEXT NOT NULL,
+            fileIDText TEXT,
+            flagsText TEXT NOT NULL,
+            flagsHexText TEXT NOT NULL,
+            uid INTEGER NOT NULL,
+            uidText TEXT NOT NULL,
+            gid INTEGER NOT NULL,
+            gidText TEXT NOT NULL,
+            uidGidText TEXT NOT NULL,
+            rawEventType TEXT NOT NULL,
+            rawEventTypeValue INTEGER,
+            rawEventTypeValueText TEXT NOT NULL,
+            rawEventVersion INTEGER NOT NULL,
+            rawEventVersionText TEXT NOT NULL,
+            sequenceText TEXT NOT NULL,
+            timestampText TEXT NOT NULL,
+            mutation INTEGER NOT NULL,
+            mutationText TEXT NOT NULL
+        )
+        """)
+
+        try db.execute(sql: """
+        CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5(
+            any_text,
+            process_text,
+            executable_text,
+            path_text,
+            signing_text,
+            team_text,
+            tokenize = 'unicode61'
+        )
+        """)
+
+        for indexSQL in baseIndexSQL + largeFilterIndexSQL {
+            try db.execute(sql: indexSQL)
+        }
     }
 }
 
