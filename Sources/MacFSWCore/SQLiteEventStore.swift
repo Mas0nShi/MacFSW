@@ -4,7 +4,7 @@ import GRDB
 public enum MacFSWSQLiteStoreError: Error, LocalizedError, Sendable {
     case unsupportedFormat(URL)
     case missingSessionMetadata
-    case invalidDatabasePath
+    case unexpectedValue(column: String, value: String)
 
     public var errorDescription: String? {
         switch self {
@@ -12,8 +12,8 @@ public enum MacFSWSQLiteStoreError: Error, LocalizedError, Sendable {
             "Unsupported MacFSW SQLite format: \(url.lastPathComponent)."
         case .missingSessionMetadata:
             "The MacFSW database is missing session metadata."
-        case .invalidDatabasePath:
-            "The MacFSW database path is invalid."
+        case .unexpectedValue(let column, let value):
+            "The session holds an unexpected \(column) value \"\(value)\"; it was not written by this version of MacFSW."
         }
     }
 }
@@ -202,8 +202,8 @@ public actor MacFSWSQLiteEventStore {
         let createdAt = session.metadata.createdAt.timeIntervalSince1970
         let updatedAt = session.metadata.updatedAt.timeIntervalSince1970
         let source = session.metadata.source.rawValue
-        let captureConfigJSON = String(data: try JSONEncoder.macfsw.encode(session.captureConfig), encoding: .utf8) ?? "{}"
-        let savedQueriesJSON = String(data: try JSONEncoder.macfsw.encode(session.savedQueries), encoding: .utf8) ?? "[]"
+        let captureConfigJSON = String(decoding: try JSONEncoder.macfsw.encode(session.captureConfig), as: UTF8.self)
+        let savedQueriesJSON = String(decoding: try JSONEncoder.macfsw.encode(session.savedQueries), as: UTF8.self)
         let annotations = session.annotations
 
         try await dbQueue.write { db in
@@ -266,16 +266,14 @@ public actor MacFSWSQLiteEventStore {
                 from: Data(savedQueriesJSON.utf8)
             )
             let annotations = try Row.fetchAll(db, sql: "SELECT * FROM annotations ORDER BY createdAt ASC")
-                .map(annotation(from:))
+                .map { try annotation(from: $0) }
 
-            let idText: String = row["id"]
-            let sourceText: String = row["source"]
             let schemaVersion: Int = row["schemaVersion"]
             let appVersion: String = row["appVersion"]
             let createdAt: Double = row["createdAt"]
             let updatedAt: Double = row["updatedAt"]
             return MacFSWResearchSession(
-                id: UUID(uuidString: idText) ?? UUID(),
+                id: try row.uuid("id"),
                 name: row["name"],
                 targetDescription: row["targetDescription"],
                 captureConfig: captureConfig,
@@ -284,7 +282,7 @@ public actor MacFSWSQLiteEventStore {
                     appVersion: appVersion,
                     createdAt: Date(timeIntervalSince1970: createdAt),
                     updatedAt: Date(timeIntervalSince1970: updatedAt),
-                    source: MacFSWSessionSource(rawValue: sourceText) ?? .live
+                    source: try row.value("source")
                 ),
                 annotations: annotations,
                 savedQueries: savedQueries
@@ -293,9 +291,6 @@ public actor MacFSWSQLiteEventStore {
     }
 
     public func copyDatabase(to destinationURL: URL) async throws {
-        guard !url.path.isEmpty else {
-            throw MacFSWSQLiteStoreError.invalidDatabasePath
-        }
         if url.standardizedFileURL == destinationURL.standardizedFileURL {
             return
         }
@@ -345,8 +340,8 @@ public actor MacFSWSQLiteEventStore {
                     session.metadata.createdAt.timeIntervalSince1970,
                     session.metadata.updatedAt.timeIntervalSince1970,
                     session.metadata.source.rawValue,
-                    String(data: try JSONEncoder.macfsw.encode(session.captureConfig), encoding: .utf8) ?? "{}",
-                    String(data: try JSONEncoder.macfsw.encode(session.savedQueries), encoding: .utf8) ?? "[]",
+                    String(decoding: try JSONEncoder.macfsw.encode(session.captureConfig), as: UTF8.self),
+                    String(decoding: try JSONEncoder.macfsw.encode(session.savedQueries), as: UTF8.self),
                 ]
             )
         }

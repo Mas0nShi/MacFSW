@@ -164,7 +164,7 @@ extension MacFSWSQLiteEventStore {
                 sql: sql,
                 arguments: statementArguments
             )
-            return rows.map(rowSummary(from:))
+            return try rows.map(rowSummary(from:))
         }
     }
 
@@ -311,7 +311,7 @@ extension MacFSWSQLiteEventStore {
 
         return try await dbQueue.read { db in
             let rows = try Row.fetchAll(db, sql: sql, arguments: arguments)
-            return rows.map(operationEventSummary(from:))
+            return try rows.map(operationEventSummary(from:))
         }
     }
 
@@ -397,20 +397,17 @@ struct StoredResultSnapshot: Sendable {
     var visibleCount: Int
 }
 
-private func rowSummary(from row: Row) -> MacFSWEventRowSummary {
-    let idText: String = row["id"]
+private func rowSummary(from row: Row) throws -> MacFSWEventRowSummary {
     let sequence: Int64 = row["sequence"]
     let timestampNS: Int64 = row["timestampNS"]
-    let eventTypeText: String = row["eventType"]
-    let operationClassText: String = row["operationClass"]
     let signingID: String? = row["signingID"]
     let teamID: String? = row["teamID"]
     return MacFSWEventRowSummary(
-        id: UUID(uuidString: idText) ?? UUID(),
+        id: try row.uuid("id"),
         sequence: UInt64(sequence),
         timestampNS: UInt64(timestampNS),
-        eventType: MacFSWEventType(rawValue: eventTypeText) ?? .unknown,
-        operationClass: MacFSWOperationClass(rawValue: operationClassText) ?? .unknown,
+        eventType: try row.value("eventType"),
+        operationClass: try row.value("operationClass"),
         processName: row["processName"],
         pid: Int32(row["pid"] as Int),
         targetPath: row["targetPath"],
@@ -435,22 +432,19 @@ private func processEventSummary(from row: Row) -> MacFSWProcessEventSummary {
         auditToken: row["auditToken"],
         executablePath: row["executablePath"],
         signingSummary: signingID ?? teamID ?? "",
-        uid: UInt32(max(0, uid)),
-        gid: UInt32(max(0, gid)),
+        uid: UInt32(uid),
+        gid: UInt32(gid),
         eventCount: row["eventCount"],
-        lastEventNS: UInt64(max(0, lastEventNS)),
+        lastEventNS: UInt64(lastEventNS),
         isPlatformBinary: isPlatformBinary != 0,
-        identityCount: row["identityCount"] ?? 1
+        identityCount: row["identityCount"]
     )
 }
 
-private func operationEventSummary(from row: Row) -> MacFSWOperationEventSummary {
-    let eventTypeText: String = row["eventType"]
-    let operationClassText: String = row["operationClass"]
-    let eventCount: Int = row["eventCount"]
-    return MacFSWOperationEventSummary(
-        eventType: MacFSWEventType(rawValue: eventTypeText) ?? .unknown,
-        operationClass: MacFSWOperationClass(rawValue: operationClassText) ?? .unknown,
-        eventCount: eventCount
+private func operationEventSummary(from row: Row) throws -> MacFSWOperationEventSummary {
+    MacFSWOperationEventSummary(
+        eventType: try row.value("eventType"),
+        operationClass: try row.value("operationClass"),
+        eventCount: row["eventCount"]
     )
 }

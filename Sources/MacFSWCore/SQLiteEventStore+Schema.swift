@@ -245,24 +245,19 @@ extension MacFSWSQLiteEventStore {
 }
 
 func eventRecord(from row: Row) throws -> MacFSWFileEvent {
-    let idText: String = row["id"]
     let sequence: Int64 = row["sequence"]
     let timestampNS: Int64 = row["timestampNS"]
-    let eventTypeText: String = row["eventType"]
-    let operationClassText: String = row["operationClass"]
     let parametersJSON: String = row["parametersJSON"]
-    let parameters = (try? JSONDecoder.macfsw.decode([MacFSWEventParameter].self, from: Data(parametersJSON.utf8))) ?? []
     let fileIDText: String? = row["fileIDText"]
-    let flagsText: String = row["flagsText"]
     let rawEventTypeValue: Int? = row["rawEventTypeValue"]
     let rawEventVersion: Int = row["rawEventVersion"]
 
     return MacFSWFileEvent(
-        id: UUID(uuidString: idText) ?? UUID(),
+        id: try row.uuid("id"),
         sequence: UInt64(sequence),
         timestampNS: UInt64(timestampNS),
-        eventType: MacFSWEventType(rawValue: eventTypeText) ?? .unknown,
-        operationClass: MacFSWOperationClass(rawValue: operationClassText) ?? .unknown,
+        eventType: try row.value("eventType"),
+        operationClass: try row.value("operationClass"),
         process: MacFSWProcessIdentity(
             pid: Int32(row["pid"] as Int),
             auditToken: row["auditToken"],
@@ -275,9 +270,9 @@ func eventRecord(from row: Row) throws -> MacFSWFileEvent {
         ),
         targetPath: row["targetPath"],
         sourcePath: row["sourcePath"],
-        parameters: parameters,
+        parameters: try JSONDecoder.macfsw.decode([MacFSWEventParameter].self, from: Data(parametersJSON.utf8)),
         fileID: fileIDText.flatMap(UInt64.init),
-        flags: UInt64(flagsText) ?? 0,
+        flags: try row.number("flagsText"),
         uid: UInt32(row["uid"] as Int),
         gid: UInt32(row["gid"] as Int),
         rawEventType: row["rawEventType"],
@@ -286,13 +281,11 @@ func eventRecord(from row: Row) throws -> MacFSWFileEvent {
     )
 }
 
-func annotation(from row: Row) -> MacFSWAnnotation {
-    let idText: String = row["id"]
-    let eventIDText: String = row["eventID"]
+func annotation(from row: Row) throws -> MacFSWAnnotation {
     let createdAt: Double = row["createdAt"]
     return MacFSWAnnotation(
-        id: UUID(uuidString: idText) ?? UUID(),
-        eventID: UUID(uuidString: eventIDText) ?? UUID(),
+        id: try row.uuid("id"),
+        eventID: try row.uuid("eventID"),
         tag: row["tag"],
         note: row["note"],
         createdAt: Date(timeIntervalSince1970: createdAt)
@@ -314,5 +307,34 @@ private extension MacFSWProcessIdentity {
 private extension Bool {
     var queryTextForStorage: String {
         self ? "true yes 1 on" : "false no 0 off"
+    }
+}
+
+/// Reading columns whose values the schema guarantees. A value that does
+/// not parse means the file was not written by this version of MacFSW,
+/// which is reported instead of being papered over with a default.
+extension Row {
+    func value<T: RawRepresentable>(_ column: String) throws -> T where T.RawValue == String {
+        let text: String = self[column]
+        guard let value = T(rawValue: text) else {
+            throw MacFSWSQLiteStoreError.unexpectedValue(column: column, value: text)
+        }
+        return value
+    }
+
+    func uuid(_ column: String) throws -> UUID {
+        let text: String = self[column]
+        guard let value = UUID(uuidString: text) else {
+            throw MacFSWSQLiteStoreError.unexpectedValue(column: column, value: text)
+        }
+        return value
+    }
+
+    func number(_ column: String) throws -> UInt64 {
+        let text: String = self[column]
+        guard let value = UInt64(text) else {
+            throw MacFSWSQLiteStoreError.unexpectedValue(column: column, value: text)
+        }
+        return value
     }
 }
