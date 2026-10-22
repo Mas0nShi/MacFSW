@@ -69,15 +69,26 @@ final class EventTableCellView: NSTableCellView {
         self.segments = segments
         self.lineBreakMode = lineBreakMode
         self.iconColor = iconColor
-        icon.image = symbolName.flatMap {
-            NSImage(systemSymbolName: $0, accessibilityDescription: toolTip)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .medium))
-        }
+        icon.image = symbolName.map(Self.symbolImage)
         icon.isHidden = icon.image == nil
         labelLeadingWithIcon.isActive = !icon.isHidden
         labelLeadingWithoutIcon.isActive = icon.isHidden
         self.toolTip = toolTip
         render()
+    }
+
+    /// Symbol lookup and configuration cost ~120 µs; there are only a
+    /// handful of operation symbols, so each is built once.
+    private static var symbolImages: [String: NSImage] = [:]
+
+    private static func symbolImage(_ name: String) -> NSImage {
+        if let image = symbolImages[name] {
+            return image
+        }
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)) ?? NSImage()
+        symbolImages[name] = image
+        return image
     }
 
     private func render() {
