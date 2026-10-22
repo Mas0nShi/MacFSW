@@ -57,3 +57,113 @@ final class TransportBenchmark: XCTestCase {
         try measure("binary plist", { try plistEncoder.encode(batch) }, { _ = try PropertyListDecoder().decode(MacFSWEventBatch.self, from: $0) })
     }
 }
+
+/// Query latency on a large store, for the operations the monitor, the
+/// sidebar, and the CLI/MCP tools run.
+final class QueryBenchmark: XCTestCase {
+    func testQueryLatencyOnLargeStore() async throws {
+        guard ProcessInfo.processInfo.environment["MACFSW_BENCH"] != nil else { throw XCTSkip("set MACFSW_BENCH") }
+        let configuredTotal = ProcessInfo.processInfo.environment["MACFSW_BENCH_EVENTS"].flatMap { Int($0) }
+        let total: Int = configuredTotal ?? 500_000
+        let store = try MacFSWSQLiteEventStore.temporary()
+        var processes: [MacFSWProcessIdentity] = []
+        for i in 0..<200 {
+            let app = "App\(i % 40)"
+            let isApple = i % 3 == 0
+            let name: String = i % 7 == 0 ? "mdworker_shared" : app
+            let signing: String = isApple ? "com.apple.app\(i)" : "com.vendor.app\(i)"
+            let team: String? = isApple ? nil : "TEAM\(i % 9)"
+            processes.append(MacFSWProcessIdentity(
+                pid: Int32(1000 + i),
+                auditToken: "token-\(i)",
+                executablePath: "/Applications/\(app).app/Contents/MacOS/\(app)",
+                processName: name,
+                signingID: signing,
+                teamID: team,
+                isPlatformBinary: isApple
+            ))
+        }
+        let types: [MacFSWEventType] = [.write, .write, .write, .create, .rename, .unlink, .chmod, .open]
+        var generator = SystemRandomNumberGenerator()
+        var appended = 0
+        let fill = ContinuousClock.now
+        while appended < total {
+            let batch = (0..<2048).map { i -> MacFSWFileEvent in
+                let n = appended + i
+                let dir = ["/Users/someone/Library/Caches", "/private/var/folders/xy/T", "/Library/LaunchAgents", "/Users/someone/Documents/Project/src", "/System/Volumes/Data/tmp"][Int(generator.next() % 5)]
+                return MacFSWFileEvent(eventType: types[Int(generator.next() % 8)], process: processes[Int(generator.next() % 200)],
+                                       targetPath: "\(dir)/item\(n % 5000)/file\(n).dat",
+                                       parameters: [MacFSWEventParameter(key: "size", label: "Size", value: "\(n % 4096)")])
+            }
+            _ = try await store.appendReturningEvents(batch)
+            appended += batch.count
+        }
+        print("BENCH fill \(appended) events in \(Self.milliseconds(since: fill)) ms")
+        let all = MacFSWEventQuery()
+        let writes = MacFSWQueryParser.parse("op:write")
+        let text = MacFSWQueryParser.parse("LaunchAgents")
+        let pathLike = MacFSWQueryParser.parse("path:*item42*")
+        let process = MacFSWQueryParser.parse("process:mdworker_shared")
+        let combined = MacFSWQueryParser.parse("mutation:true apple:false path:/Library")
+        var t = ContinuousClock.now
+        _ = try await store.count(matching: all)
+        print("BENCH count all: \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.count(matching: writes)
+        print("BENCH count op:write: \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.count(matching: text)
+        print("BENCH count text LaunchAgents (FTS): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.count(matching: pathLike)
+        print("BENCH count path glob (LIKE): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.count(matching: process)
+        print("BENCH count process:mdworker: \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.count(matching: combined)
+        print("BENCH count combined: \(Self.milliseconds(since: t)) ms")
+        let snapshot = try await store.createResultSnapshot(matching: writes, sortOrder: .oldestFirst)
+        t = ContinuousClock.now
+        _ = try await store.rowSummaries(in: snapshot, visibleRange: 0..<256)
+        print("BENCH rows page at start (op:write): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.rowSummaries(in: snapshot, visibleRange: (snapshot.visibleCount / 2)..<(snapshot.visibleCount / 2 + 256))
+        print("BENCH rows page at middle (op:write): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.rowSummaries(in: snapshot, visibleRange: (snapshot.visibleCount - 256)..<snapshot.visibleCount)
+        print("BENCH rows page at end (op:write): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.events(matching: all, sortOrder: .newestFirst, limit: 100)
+        print("BENCH events newest 100 (CLI default --newest): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.events(matching: all, limit: 100, offset: 400_000)
+        print("BENCH events offset 400k (MCP paging): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.operationSummaries(matching: all)
+        print("BENCH operation summaries all: \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.processSummaries()
+        print("BENCH process summaries all (sidebar on open): \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.processSummaries(matching: MacFSWQueryParser.parse("op:unlink"))
+        print("BENCH process summaries op:unlink: \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        _ = try await store.distinctValues(for: .processName, matching: writes, limit: 50)
+        print("BENCH facet processName for op:write: \(Self.milliseconds(since: t)) ms")
+        t = ContinuousClock.now
+        do {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("bench-\(UUID().uuidString).macfsw-session")
+            try await store.copyDatabase(to: url)
+            print("BENCH file size \((try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int).map { $0 / 1_048_576 } ?? -1) MB")
+            try? FileManager.default.removeItem(at: url)
+        }
+        print("BENCH save copy (VACUUM INTO): \(Self.milliseconds(since: t)) ms")
+        try await store.cleanupBackingStore()
+    }
+
+    private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
+        let elapsed = start.duration(to: .now)
+        return Int(elapsed.components.seconds * 1000) + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
+    }
+}
