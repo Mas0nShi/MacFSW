@@ -31,14 +31,17 @@ public enum MacFSWQueryPrinter {
         }
     }
 
-    /// Non-predicate children are always parenthesized. This is what lets a
-    /// nested same-operator tree (`.or([.or([a, b]), c])`) survive the
-    /// parser's chain flattening.
+    /// Compound children are parenthesized. This is what lets a nested
+    /// same-operator tree (`.or([.or([a, b]), c])`) survive the parser's
+    /// chain flattening. A negated predicate needs no parentheses: NOT binds
+    /// tighter than AND and OR.
     private static func childText(_ child: MacFSWQueryExpression) -> String {
-        if case .predicate = child {
+        switch child {
+        case .predicate, .not(.predicate):
             return text(for: child)
+        default:
+            return "(" + text(for: child) + ")"
         }
-        return "(" + text(for: child) + ")"
     }
 
     private static func text(for predicate: MacFSWQueryPredicate) -> String {
