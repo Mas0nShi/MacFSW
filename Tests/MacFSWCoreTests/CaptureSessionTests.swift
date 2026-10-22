@@ -438,6 +438,8 @@ final class EventTypeQueryTests: XCTestCase {
             let count = try await store.count(matching: MacFSWQueryParser.parse(text))
             XCTAssertEqual(count, expected, text)
         }
+        let unknown = MacFSWQueryParser.parseDetailed("op:unknown").diagnostics.map(\.kind)
+        XCTAssertEqual(unknown, [.invalidValue(fieldText: "op", value: "unknown")], "unknown is no longer an event type")
         try await store.cleanupBackingStore()
     }
 }

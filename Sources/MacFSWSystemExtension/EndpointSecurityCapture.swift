@@ -180,9 +180,9 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
 
     #if canImport(EndpointSecurity)
     private func subscribe(client: OpaquePointer) throws {
-        var events = config.eventTypes.compactMap(esEventType)
+        var events = config.eventTypes.map(esEventType)
         if events.isEmpty {
-            events = MacFSWEventType.defaultCaptureTypes.compactMap(esEventType)
+            events = MacFSWEventType.defaultCaptureTypes.map(esEventType)
         }
         let result = events.withUnsafeBufferPointer { buffer in
             es_subscribe(client, buffer.baseAddress!, UInt32(buffer.count))
@@ -267,8 +267,7 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
     }
 
     private func snapshot(message: UnsafePointer<es_message_t>) -> MacFSWFileEvent? {
-        let eventType = macfswEventType(message.pointee.event_type)
-        guard eventType != .unknown else {
+        guard let eventType = macfswEventType(message.pointee.event_type) else {
             return nil
         }
 
@@ -549,7 +548,8 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         return "\(value.tv_sec).\(nanoseconds)"
     }
 
-    private func macfswEventType(_ eventType: es_event_type_t) -> MacFSWEventType {
+    /// nil for ES event types MacFSW does not record.
+    private func macfswEventType(_ eventType: es_event_type_t) -> MacFSWEventType? {
         switch eventType {
         case ES_EVENT_TYPE_NOTIFY_CREATE: .create
         case ES_EVENT_TYPE_NOTIFY_OPEN: .open
@@ -569,7 +569,7 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         case ES_EVENT_TYPE_NOTIFY_SETEXTATTR: .setextattr
         case ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR: .deleteextattr
         case ES_EVENT_TYPE_NOTIFY_UTIMES: .utimes
-        default: .unknown
+        default: nil
         }
     }
 
@@ -597,7 +597,7 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         }
     }
 
-    private func esEventType(_ eventType: MacFSWEventType) -> es_event_type_t? {
+    private func esEventType(_ eventType: MacFSWEventType) -> es_event_type_t {
         switch eventType {
         case .create: ES_EVENT_TYPE_NOTIFY_CREATE
         case .open: ES_EVENT_TYPE_NOTIFY_OPEN
@@ -617,7 +617,6 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         case .setextattr: ES_EVENT_TYPE_NOTIFY_SETEXTATTR
         case .deleteextattr: ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR
         case .utimes: ES_EVENT_TYPE_NOTIFY_UTIMES
-        case .unknown: nil
         }
     }
 

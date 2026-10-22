@@ -127,8 +127,6 @@ extension EventTableView.Coordinator {
                 .systemOrange
             case .link:
                 .systemMint
-            case .unknown:
-                .secondaryLabelColor
             }
         }
 

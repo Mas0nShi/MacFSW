@@ -19,20 +19,8 @@ public enum MacFSWEventType: String, Codable, CaseIterable, Identifiable, Sendab
     case setextattr
     case deleteextattr
     case utimes
-    case unknown
 
     public var id: String { rawValue }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let rawValue = try container.decode(String.self)
-        self = MacFSWEventType(rawValue: rawValue) ?? .unknown
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
 
     public var operationClass: MacFSWOperationClass {
         switch self {
@@ -46,13 +34,11 @@ public enum MacFSWEventType: String, Codable, CaseIterable, Identifiable, Sendab
             .delete
         case .chmod, .chown, .setflags, .setacl, .setextattr, .deleteextattr, .utimes:
             .metadata
-        case .unknown:
-            .unknown
         }
     }
 
     public var isMutation: Bool {
-        operationClass != .read && operationClass != .unknown
+        operationClass != .read
     }
 
     public static var defaultCaptureTypes: [MacFSWEventType] {
@@ -64,12 +50,7 @@ public enum MacFSWEventType: String, Codable, CaseIterable, Identifiable, Sendab
     }
 
     public var isTransportSafeCaptureType: Bool {
-        switch self {
-        case .unknown, .setflags:
-            false
-        default:
-            true
-        }
+        self != .setflags
     }
 
     private var isDefaultCaptureType: Bool {
@@ -83,7 +64,6 @@ public enum MacFSWOperationClass: String, Codable, CaseIterable, Identifiable, S
     case metadata
     case delete
     case link
-    case unknown
 
     public var id: String { rawValue }
 }
