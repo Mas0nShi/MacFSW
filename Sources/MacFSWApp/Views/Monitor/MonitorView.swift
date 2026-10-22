@@ -40,6 +40,9 @@ struct MonitorView: View {
                     model.monitor.perform(action, on: row)
                 }
             )
+            .overlay {
+                MonitorEmptyState()
+            }
             StatusBar()
         }
     }
@@ -47,6 +50,7 @@ struct MonitorView: View {
 
 struct MonitorCommandBar: View {
     @Environment(MacFSWAppCoordinator.self) private var model
+    @State private var showsSyntaxHelp = false
 
     var body: some View {
         @Bindable var monitor = model.monitor
@@ -57,7 +61,7 @@ struct MonitorCommandBar: View {
 
                 CommandBarTextField(
                     text: $monitor.queryText,
-                    placeholder: "(op:rename OR op:unlink) path:/Library NOT platform:true",
+                    placeholder: "Filter events — e.g. path:/Library op:rename",
                     isSuggestionListVisible: model.monitor.isQuerySuggestionListVisible,
                     onEditingChanged: {
                         model.monitor.queryTextEdited()
@@ -107,6 +111,22 @@ struct MonitorCommandBar: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .help("Clear query")
+                }
+
+                Button {
+                    showsSyntaxHelp.toggle()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Query syntax")
+                .popover(isPresented: $showsSyntaxHelp, arrowEdge: .bottom) {
+                    QuerySyntaxHelpView { example in
+                        showsSyntaxHelp = false
+                        model.monitor.applyEditedQuery(example)
+                    }
                 }
             }
             .padding(.horizontal, 10)
@@ -138,6 +158,7 @@ struct MonitorCommandBar: View {
             } label: {
                 Label(recordButtonTitle, systemImage: recordButtonSymbol)
             }
+            .keyboardShortcut("r")
             .disabled(model.session.isReadOnly || model.session.captureState == .stopping)
             .help(model.session.isReadOnly ? Self.readOnlyHelp : "")
 
@@ -187,5 +208,74 @@ struct MonitorCommandBar: View {
             return "lock.shield"
         }
         return model.extensionStatus.installState == .ready ? "record.circle" : "puzzlepiece.extension"
+    }
+}
+
+/// Shown over the table when it has no rows, explaining why and offering
+/// the one action that changes that.
+private struct MonitorEmptyState: View {
+    @Environment(MacFSWAppCoordinator.self) private var model
+
+    var body: some View {
+        if model.monitor.visibleEventCount == 0, !model.monitor.isApplyingFilter, let content {
+            ContentUnavailableView {
+                Label(content.title, systemImage: content.symbol)
+            } description: {
+                Text(content.detail)
+            } actions: {
+                if let action = content.action {
+                    Button(action.title, action: action.perform)
+                        .buttonStyle(.bordered)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.background)
+            .padding(.top, 28) // keep the column headers visible
+        }
+    }
+
+    private struct Content {
+        var title: String
+        var symbol: String
+        var detail: String
+        var action: (title: String, perform: () -> Void)?
+    }
+
+    private var content: Content? {
+        let session = model.session
+        if session.captureState == .recording || session.captureState == .connecting {
+            return model.monitor.queryText.isEmpty
+                ? Content(title: "Waiting for Events", symbol: "dot.radiowaves.left.and.right", detail: "File-system activity appears here as it happens.")
+                : noMatches
+        }
+        if session.captureStats.deliveredEvents > 0 {
+            return noMatches
+        }
+        if session.isReadOnly {
+            return Content(title: "No Events", symbol: "tray", detail: "This session was saved without any events.")
+        }
+        if model.extensionStatus.installState != .ready {
+            return Content(
+                title: "Endpoint Extension Needed",
+                symbol: "puzzlepiece.extension",
+                detail: "MacFSW records through its Endpoint Extension. Enable it, then approve it in System Settings.",
+                action: ("Enable Extension", { model.activateSystemExtension() })
+            )
+        }
+        return Content(
+            title: "No Events Yet",
+            symbol: "record.circle",
+            detail: "Record, reproduce the behavior you want to study, then stop. Press ⌘R to start.",
+            action: ("Record", { model.recordButtonTapped() })
+        )
+    }
+
+    private var noMatches: Content {
+        Content(
+            title: "No Matching Events",
+            symbol: "line.3.horizontal.decrease.circle",
+            detail: "Nothing recorded matches \(model.monitor.queryText).",
+            action: ("Clear Query", { model.monitor.clearQuery() })
+        )
     }
 }
