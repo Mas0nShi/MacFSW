@@ -5,6 +5,7 @@ import SwiftUI
 /// across pages.
 struct MainToolbar: ToolbarContent {
     let model: MacFSWAppCoordinator
+    let inspectorIsPresented: Binding<Bool>
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .principal) {
@@ -47,6 +48,13 @@ struct MainToolbar: ToolbarContent {
             }
             .disabled(model.session.isReadOnly || model.session.captureStats.deliveredEvents == 0)
             .help(model.session.isReadOnly ? Self.readOnlyHelp : "Delete every event in this session")
+
+            if model.selectedPage == .monitor {
+                Toggle(isOn: inspectorIsPresented) {
+                    Label("Inspector", systemImage: "sidebar.trailing")
+                }
+                .help("Show or hide the event inspector")
+            }
         }
     }
 

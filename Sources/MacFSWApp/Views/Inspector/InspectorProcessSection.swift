@@ -10,6 +10,22 @@ struct InspectorProcessSection: View {
         VStack(alignment: .leading, spacing: 5) {
             InspectorGroup("Process", systemImage: "cpu") {
                 InspectorRowContainer {
+                    HStack(spacing: 10) {
+                        ProcessIconView(executablePath: event.process.executablePath, fallbackSymbolName: "terminal")
+                            .frame(width: 22, height: 22)
+                        Text(event.process.processName)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .layoutPriority(1)
+                        Spacer(minLength: 6)
+                        InspectorMetadataChip("PID \(event.process.pid)")
+                        InspectorPrivilegeChip(uid: event.uid, gid: event.gid)
+                        InspectorCopyButton(value: event.process.processName, label: "Process", onCopy: onCopy)
+                    }
+                }
+
+                InspectorRowContainer {
                     InspectorChipFlow(spacing: 6) {
                         ForEach(badges, id: \.self) { badge in
                             InspectorBadgeChip(badge: badge)

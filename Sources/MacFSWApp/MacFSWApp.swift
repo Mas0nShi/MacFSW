@@ -20,6 +20,7 @@ struct MacFSWApp: App {
         }
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
+            InspectorCommands()
             CommandGroup(replacing: .newItem) {
                 Button("New Session") {
                     coordinator.newSession()

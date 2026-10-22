@@ -4,10 +4,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @Environment(MacFSWAppCoordinator.self) private var model
-    @AppStorage("MacFSW.InspectorWidth") private var inspectorWidth = Self.defaultInspectorWidth
-
-    private static let defaultInspectorWidth: Double = 380
-    private static let inspectorWidthRange: ClosedRange<Double> = 320 ... 640
+    @AppStorage("MacFSW.ShowsInspector") private var showsInspector = true
 
     var body: some View {
         HStack(spacing: 0) {
@@ -26,22 +23,13 @@ struct DashboardView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            if model.selectedPage == .monitor, model.monitor.shouldShowInspector {
-                InspectorResizeHandle(
-                    width: $inspectorWidth,
-                    range: Self.inspectorWidthRange,
-                    defaultWidth: Self.defaultInspectorWidth
-                )
-                .transition(.opacity)
-
-                InspectorView(event: model.monitor.selectedEvent, isLoading: model.monitor.selectedEventIsLoading)
-                    .frame(width: clampedInspectorWidth)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
+        }
+        .inspector(isPresented: inspectorIsPresented) {
+            InspectorView(event: model.monitor.selectedEvent, isLoading: model.monitor.selectedEventIsLoading)
+                .inspectorColumnWidth(min: 320, ideal: 380, max: 640)
         }
         .animation(.easeInOut(duration: 0.16), value: model.selectedPage)
-        .toolbar { MainToolbar(model: model) }
+        .toolbar { MainToolbar(model: model, inspectorIsPresented: inspectorIsPresented) }
         .navigationTitle(model.session.research.name)
         .navigationSubtitle(model.windowSubtitle)
         .dropDestination(for: URL.self) { urls, _ in
@@ -53,49 +41,13 @@ struct DashboardView: View {
         }
     }
 
-    private var clampedInspectorWidth: Double {
-        min(max(inspectorWidth, Self.inspectorWidthRange.lowerBound), Self.inspectorWidthRange.upperBound)
-    }
-}
-
-private struct InspectorResizeHandle: View {
-    @Binding var width: Double
-    let range: ClosedRange<Double>
-    let defaultWidth: Double
-
-    @State private var dragStartWidth: Double?
-
-    var body: some View {
-        Divider()
-            .overlay {
-                Color.clear
-                    .frame(width: 9)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        if hovering {
-                            NSCursor.resizeLeftRight.set()
-                        } else if dragStartWidth == nil {
-                            NSCursor.arrow.set()
-                        }
-                    }
-                    .onTapGesture(count: 2) {
-                        width = defaultWidth
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { value in
-                                let start = dragStartWidth ?? width
-                                dragStartWidth = start
-                                NSCursor.resizeLeftRight.set()
-                                width = min(max(start - value.translation.width, range.lowerBound), range.upperBound)
-                            }
-                            .onEnded { _ in
-                                dragStartWidth = nil
-                                NSCursor.arrow.set()
-                            }
-                    )
-            }
-            .accessibilityLabel("Resize inspector")
+    /// The inspector belongs to the monitor: it follows the user's toggle
+    /// there and stays out of the way on other pages.
+    private var inspectorIsPresented: Binding<Bool> {
+        Binding(
+            get: { showsInspector && model.selectedPage == .monitor },
+            set: { if model.selectedPage == .monitor { showsInspector = $0 } }
+        )
     }
 }
 

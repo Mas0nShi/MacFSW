@@ -117,10 +117,6 @@ final class MonitorStore {
         self.queryHistory = queryHistory
     }
 
-    var shouldShowInspector: Bool {
-        selectedEventID != nil || selectedEvent != nil || selectedEventIsLoading
-    }
-
     func reportError(_ error: any Error) {
         onError(error)
     }

@@ -5,8 +5,10 @@ struct InspectorView: View {
     let event: MacFSWFileEvent?
     let isLoading: Bool
 
-    @State private var showsForensics = false
-    @State private var showsEntitlements = true
+    // Process-level detail is the same for every event of a process, so it
+    // starts folded; the choice sticks while stepping through events.
+    @AppStorage("MacFSW.Inspector.ShowsEntitlements") private var showsEntitlements = false
+    @AppStorage("MacFSW.Inspector.ShowsForensics") private var showsForensics = false
     @State private var securityPhase: InspectorSecurityPhase = .loading
 
     private static let scrollTopAnchor = "inspector-scroll-top"
@@ -28,7 +30,7 @@ struct InspectorView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 if let event {
-                    InspectorHeader(event: event, onCopy: copy)
+                    InspectorHeader(event: event)
 
                     InspectorGroup("Target", systemImage: "scope") {
                         InspectorField(
@@ -99,7 +101,7 @@ struct InspectorView: View {
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
                 } else {
-                    ContentUnavailableView("No Event Selected", systemImage: "doc.text.magnifyingglass")
+                    ContentUnavailableView("No Selection", systemImage: "doc.text.magnifyingglass", description: Text("Select an event to see its details."))
                         .frame(maxWidth: .infinity, minHeight: 260)
                 }
             }
@@ -107,7 +109,6 @@ struct InspectorView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(Self.scrollTopAnchor)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: event?.id) {
             // A scroll offset carried over from a longer event would land beyond
             // the new (still loading) content and leave the lazy stack blank.
@@ -142,80 +143,39 @@ enum InspectorSecurityPhase: Equatable {
 
 typealias InspectorCopyAction = (_ value: String, _ label: String) -> Void
 
+/// What happened and when. The process that did it has its own section.
 struct InspectorHeader: View {
     let event: MacFSWFileEvent
-    let onCopy: InspectorCopyAction
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 11) {
-                ProcessIconView(executablePath: event.process.executablePath, fallbackSymbolName: "terminal")
-                    .frame(width: 24, height: 24)
-                    .padding(8)
-                    .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(event.process.processName)
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .layoutPriority(1)
-
-                Spacer(minLength: 6)
-
-                InspectorOperationBadge(event: event)
-
-                InspectorCopyButton(
-                    value: event.process.processName,
-                    label: "Process",
-                    onCopy: onCopy
-                )
-            }
-
-            HStack(spacing: 6) {
-                InspectorMetadataChip("PID \(event.process.pid)")
-                InspectorPrivilegeChip(uid: event.uid, gid: event.gid)
-                Spacer(minLength: 0)
-                InspectorMetadataChip(format(timestampNS: event.timestampNS))
-            }
-        }
-        .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        }
-    }
-}
-
-struct InspectorOperationBadge: View {
-    let event: MacFSWFileEvent
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 3) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(event.eventType.rawValue.uppercased())
-                .font(.caption.weight(.bold))
+                .font(.callout.weight(.bold))
                 .foregroundStyle(color(for: event.eventType))
-                .lineLimit(1)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 9)
                 .padding(.vertical, 4)
                 .background(color(for: event.eventType).opacity(0.10), in: Capsule())
+                .accessibilityLabel("Operation \(event.eventType.rawValue)")
 
-            if let subtitle = operationSubtitle {
-                Text(subtitle)
-                    .font(.caption2.weight(.medium))
+            if let bucket = bucketTitle {
+                Text(bucket)
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
+
+            Spacer(minLength: 6)
+
+            Text(format(timestampNS: event.timestampNS))
+                .font(.callout)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
         }
-        .accessibilityLabel("Operation \(event.eventType.rawValue)")
     }
 
-    private var operationSubtitle: String? {
-        let eventTitle = event.eventType.rawValue.uppercased()
-        let classTitle = MacFSWOperationBucket.bucket(for: event.eventType).title
-        return classTitle == eventTitle ? nil : classTitle
+    private var bucketTitle: String? {
+        let title = MacFSWOperationBucket.bucket(for: event.eventType).title
+        return title == event.eventType.rawValue.uppercased() ? nil : title
     }
 }
 

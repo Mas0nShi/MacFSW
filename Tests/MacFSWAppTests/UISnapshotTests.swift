@@ -36,6 +36,15 @@ final class UISnapshotTests: XCTestCase {
         try await snapshot(model, named: "02-events-inspector")
     }
 
+    /// The inspector column alone: offscreen rendering cannot draw it inside
+    /// the window's split view.
+    func testInspectorContent() async throws {
+        let process = MacFSWProcessIdentity(pid: 1, auditToken: "a", executablePath: "/sbin/launchd", processName: "launchd", signingID: "com.apple.xpc.launchd", isPlatformBinary: true)
+        let event = MacFSWFileEvent(eventType: .rename, process: process, targetPath: "/private/var/log/com.apple.xpc.launchd/launchd.log", sourcePath: "/private/var/log/com.apple.xpc.launchd/launchd.log.1")
+        let host = NSHostingView(rootView: InspectorView(event: event, isLoading: false).frame(width: 380, height: 760))
+        try await render(host, size: NSSize(width: 380, height: 760), named: "04-inspector")
+    }
+
     func testExtensionNotInstalledWithError() async throws {
         let model = makeCoordinator()
         model.extensionStatus.applyHealthRefreshFailure(message: "unreachable")
@@ -109,6 +118,20 @@ final class UISnapshotTests: XCTestCase {
             return XCTFail("no bitmap")
         }
         frameView.cacheDisplay(in: bounds, to: bitmap)
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        try png.write(to: outputDirectory.appendingPathComponent("\(name).png"))
+        window.close()
+    }
+
+    private func render(_ view: NSView, size: NSSize, named name: String) async throws {
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        try await settle()
+        try await settle()
+        view.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
         let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
         try png.write(to: outputDirectory.appendingPathComponent("\(name).png"))
         window.close()
