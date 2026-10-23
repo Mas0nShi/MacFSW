@@ -29,6 +29,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The runner defaults to an older Xcode; build with the one the app is
+      # developed and tested with.
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+
       - name: Show toolchain
         run: |
           sw_vers

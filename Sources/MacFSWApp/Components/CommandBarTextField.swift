@@ -437,6 +437,9 @@ struct CommandBarTextField: NSViewRepresentable {
 
 /// Owns the retractable undo registration of an active suggestion preview;
 /// disposing the token (removeAllActions) retracts exactly that one action.
+/// Main-actor isolated, which makes it Sendable: the undo manager's handler
+/// receives it as a sending parameter.
+@MainActor
 private final class PreviewUndoToken: NSObject {
     weak var owner: CommandBarTextField.Coordinator?
 }
