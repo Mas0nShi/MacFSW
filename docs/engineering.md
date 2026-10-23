@@ -130,7 +130,7 @@ A production app bundle should still be archived from an Xcode project with:
 Version metadata has a single source of truth in `Configuration/Signing.xcconfig`:
 
 ```text
-MARKETING_VERSION = 0.2.0
+MARKETING_VERSION = 0.2.1
 CURRENT_PROJECT_VERSION = 21
 ```
 
