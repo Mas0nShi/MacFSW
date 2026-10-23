@@ -130,8 +130,8 @@ A production app bundle should still be archived from an Xcode project with:
 Version metadata has a single source of truth in `Configuration/Signing.xcconfig`:
 
 ```text
-MARKETING_VERSION = 0.1.8
-CURRENT_PROJECT_VERSION = 20
+MARKETING_VERSION = 0.2.0
+CURRENT_PROJECT_VERSION = 21
 ```
 
 Those are the standard Xcode build setting names for `CFBundleShortVersionString` and `CFBundleVersion`. App code must read the installed bundle metadata through `Bundle.main` when it needs the product version, for example when creating session metadata. Core libraries must not hardcode the App version.
