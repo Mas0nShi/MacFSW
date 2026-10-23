@@ -52,7 +52,10 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-swiftpm-
 
       - name: Test
-        run: swift test --disable-sandbox --configuration "$CONFIGURATION"
+        # The tests are all XCTest. The Swift Testing pass has nothing to run,
+        # and in release builds it starts the macfsw executable the CLI tests
+        # link, which exits 1 on the runner's arguments.
+        run: swift test --disable-sandbox --disable-swift-testing --configuration "$CONFIGURATION"
 
       - name: Import signing certificate
         env:
