@@ -25,5 +25,5 @@ for key in MARKETING_VERSION CURRENT_PROJECT_VERSION; do
   fi
 done
 
-swift test --disable-sandbox
+swift test --disable-sandbox --disable-swift-testing
 swift build --disable-sandbox

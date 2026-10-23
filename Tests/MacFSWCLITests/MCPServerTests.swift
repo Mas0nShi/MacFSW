@@ -57,6 +57,31 @@ final class MCPServerTests: XCTestCase {
         await server.stop()
     }
 
+    /// Codex declares object-valued experimental capabilities, which the
+    /// SDK alone rejects (swift-sdk#287).
+    func testHandshakeAcceptsObjectValuedExperimentalCapabilities() async throws {
+        let workspace = Workspace(client: MacFSWXPCCaptureClient(serviceName: "invalid.macfsw.test", healthTimeoutSeconds: 1), appVersion: "test")
+        let server = await MacFSWMCPServer.make(workspace: workspace)
+        let (clientTransport, serverTransport) = await InMemoryTransport.createConnectedPair()
+        try await server.start(transport: InitializeCompatibleTransport(serverTransport))
+        try await clientTransport.connect()
+
+        let initialize = #"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{"experimental":{"codex/sandbox":{"enabled":true}},"elicitation":{}},"clientInfo":{"name":"codex-mcp-client","version":"0.163.0"}}}"#
+        try await clientTransport.send(Data(initialize.utf8))
+        var responses = await clientTransport.receive().makeAsyncIterator()
+        let next = try await responses.next()
+        let response = try XCTUnwrap(next)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: response) as? [String: Any])
+        XCTAssertNil(json["error"], String(decoding: response, as: UTF8.self))
+        XCTAssertNotNil(json["result"])
+
+        let other = Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x","arguments":{"experimental":{"a":1}}}}"#.utf8)
+        XCTAssertEqual(InitializeCompatibleTransport.decodable(other), other)
+
+        await clientTransport.disconnect()
+        await server.stop()
+    }
+
     func testParsesTheActivatedExtensionFromSystemExtensionsList() {
         let listing = """
         2 extension(s)

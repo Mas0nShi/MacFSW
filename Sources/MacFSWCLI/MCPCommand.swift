@@ -14,7 +14,7 @@ struct MCPCommand: AsyncParsableCommand {
     func run() async throws {
         let workspace = MacFSWCommand.makeWorkspace()
         let server = await MacFSWMCPServer.make(workspace: workspace)
-        try await server.start(transport: StdioTransport())
+        try await server.start(transport: InitializeCompatibleTransport(StdioTransport()))
         await server.waitUntilCompleted()
         try? await workspace.close()
     }
