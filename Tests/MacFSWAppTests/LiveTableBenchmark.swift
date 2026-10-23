@@ -97,6 +97,51 @@ final class LiveTableBenchmark: XCTestCase {
         print("BENCH scroll by \(stepRows) rows: p50=\(sorted[sorted.count / 2]) p95=\(sorted[sorted.count * 95 / 100])")
     }
 
+    /// Frames dropped while the user interacts with a loaded session:
+    /// stepping through rows, moving the mouse, typing a query.
+    func testInteraction() async throws {
+        let model = makeCoordinator()
+        _ = try await model.session.eventStore.appendReturningEvents(Self.events(count: 20_000, startingAt: 0))
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 860), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.acceptsMouseMovedEvents = true
+        window.contentView = NSHostingView(rootView: DashboardView().environment(model))
+        window.orderFrontRegardless()
+        model.monitor.pauseFollowing()
+        await model.monitor.refreshFilteredEvents()
+        try await Task.sleep(for: .milliseconds(600))
+
+        func measure(_ name: String, steps: Int, interval: Duration, _ step: (Int) async throws -> Void) async throws {
+            let frames = FrameRecorder(view: window.contentView!)
+            frames.start()
+            for i in 0..<steps {
+                try await step(i)
+                try await Task.sleep(for: interval)
+            }
+            frames.stop()
+            let refresh = frames.refreshInterval
+            let hitches = frames.intervals.filter { $0 > refresh * 1.5 }
+            print("BENCH interaction \(name): frames=\(frames.intervals.count) hitches=\(hitches.count) max=\(frames.intervals.max() ?? .zero)")
+        }
+
+        try await measure("select rows", steps: 60, interval: .milliseconds(50)) { i in
+            model.monitor.selectEvent(nil, row: 100 + i)
+        }
+        try await measure("mouse moves", steps: 180, interval: .milliseconds(16)) { i in
+            let x = 300 + CGFloat(i % 90) * 12
+            let y = 120 + CGFloat(i % 40) * 15
+            if let event = NSEvent.mouseEvent(with: .mouseMoved, location: NSPoint(x: x, y: y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
+                window.sendEvent(event)
+            }
+        }
+        let query = "path:/Users/me/Library op:write,create -process:tool3"
+        try await measure("typing", steps: query.count, interval: .milliseconds(80)) { i in
+            model.monitor.queryText = String(query.prefix(i + 1))
+            model.monitor.queryTextEdited()
+        }
+        window.close()
+    }
+
     /// Clearing a large session while events stream in: how soon the view
     /// empties, how long the store takes, and whether frames hitch.
     func testClearWhileLive() async throws {
