@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import MacFSWCore
 import Security
 import SystemExtensions
 
@@ -7,6 +8,8 @@ enum MacFSWSystemExtensionInstallState: String {
     case unknown
     case notReady
     case activating
+    /// macOS finished activating; the new extension process is starting.
+    case starting
     case needsApproval
     case ready
     case failed
@@ -19,6 +22,8 @@ enum MacFSWSystemExtensionInstallState: String {
             "Not Installed"
         case .activating:
             "Activating"
+        case .starting:
+            "Starting"
         case .needsApproval:
             "Needs Approval"
         case .ready:
@@ -34,7 +39,7 @@ enum MacFSWSystemExtensionInstallState: String {
             "circle.dotted"
         case .notReady:
             "puzzlepiece.extension"
-        case .activating:
+        case .activating, .starting:
             "arrow.triangle.2.circlepath"
         case .needsApproval:
             "hand.raised"
@@ -58,10 +63,14 @@ final class SystemExtensionInstaller: NSObject {
     static let shared = SystemExtensionInstaller()
 
     var onStateChange: ((MacFSWSystemExtensionInstallState, String) -> Void)?
+    var onUpdateStarted: ((String, String) -> Void)?
 
-    private var submitted = false
-    private var currentRequest: OSSystemExtensionRequest?
-    private var currentRequestKind: RequestKind?
+    /// Requests macOS has not answered yet, by identity: callbacks from a
+    /// properties lookup must never be mistaken for the activation's.
+    private var pendingRequests: [ObjectIdentifier: RequestKind] = [:]
+    private var isActivating: Bool {
+        pendingRequests.values.contains(.activation)
+    }
     private let installEntitlement = "com.apple.developer.system-extension.install"
 
     private enum RequestKind {
@@ -74,7 +83,7 @@ final class SystemExtensionInstaller: NSObject {
            !identifier.isEmpty {
             return identifier
         }
-        return "com.mas0n.MacFSW.EndpointExtension"
+        return MacFSWXPCDefaults.extensionBundleIdentifier
     }
 
     func activate() {
@@ -102,43 +111,35 @@ final class SystemExtensionInstaller: NSObject {
             return
         }
 
-        guard !submitted else {
-            publish(.activating, "System Extension activation is already in progress.")
+        // One activation at a time: a second one would supersede the first
+        // and its failure would mask the outcome that matters.
+        guard !isActivating else {
             return
         }
 
-        submitted = true
         publish(.activating, "Requesting macOS to activate the MacFSW Endpoint Extension.")
-
-        let request = OSSystemExtensionRequest.activationRequest(
-            forExtensionWithIdentifier: extensionIdentifier,
-            queue: .main
-        )
-        request.delegate = self
-        currentRequest = request
-        currentRequestKind = .activation
-        OSSystemExtensionManager.shared.submitRequest(request)
+        submit(.activationRequest(forExtensionWithIdentifier: extensionIdentifier, queue: .main), as: .activation)
     }
 
+    /// Compares the activated extension with the bundled one and updates it
+    /// when they differ. Skipped while an activation is already running.
     func checkInstalledVersion() {
-        guard isRunningFromAppBundle else {
+        guard isRunningFromAppBundle, !isActivating else {
             return
         }
+        submit(.propertiesRequest(forExtensionWithIdentifier: extensionIdentifier, queue: .main), as: .properties)
+    }
 
-        let request = OSSystemExtensionRequest.propertiesRequest(
-            forExtensionWithIdentifier: extensionIdentifier,
-            queue: .main
-        )
+    private func submit(_ request: OSSystemExtensionRequest, as kind: RequestKind) {
         request.delegate = self
-        currentRequest = request
-        currentRequestKind = .properties
+        pendingRequests[ObjectIdentifier(request)] = kind
         OSSystemExtensionManager.shared.submitRequest(request)
     }
 
-    func resetSubmission() {
-        submitted = false
-        currentRequest = nil
-        currentRequestKind = nil
+    /// Removes and returns the kind of a request macOS just answered; nil
+    /// for requests already settled.
+    private func settle(_ id: ObjectIdentifier) -> RequestKind? {
+        pendingRequests.removeValue(forKey: id)
     }
 
     func openLoginItemsSettings() {
@@ -202,30 +203,29 @@ extension SystemExtensionInstaller: OSSystemExtensionRequestDelegate {
         _ request: OSSystemExtensionRequest,
         didFinishWithResult result: OSSystemExtensionRequest.Result
     ) {
+        let id = ObjectIdentifier(request)
         Task { @MainActor in
-            guard currentRequestKind == .activation else {
-                currentRequest = nil
-                currentRequestKind = nil
+            guard settle(id) == .activation else {
                 return
             }
-            submitted = false
-            currentRequest = nil
-            currentRequestKind = nil
-            publish(.ready, "System Extension activation finished. Checking capture service readiness.")
+            switch result {
+            case .willCompleteAfterReboot:
+                publish(.needsApproval, "Restart your Mac to finish installing the Endpoint Extension.")
+            default:
+                publish(.starting, "Endpoint Extension activated. Waiting for it to start.")
+            }
         }
     }
 
     nonisolated func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
+        let id = ObjectIdentifier(request)
+        let superseded = (error as NSError).domain == OSSystemExtensionErrorDomain
+            && (error as NSError).code == OSSystemExtensionError.requestSuperseded.rawValue
         Task { @MainActor in
-            guard currentRequestKind == .activation else {
-                currentRequest = nil
-                currentRequestKind = nil
+            guard settle(id) == .activation, !superseded else {
                 return
             }
-            submitted = false
-            currentRequest = nil
-            currentRequestKind = nil
-            publish(.failed, userFacingMessage(error))
+            publish(.failed, error.userFacingMessage)
         }
     }
 
@@ -255,16 +255,17 @@ extension SystemExtensionInstaller: OSSystemExtensionRequestDelegate {
                 isUninstalling: $0.isUninstalling
             )
         }
+        let id = ObjectIdentifier(request)
         Task { @MainActor in
+            guard settle(id) == .properties else {
+                return
+            }
             handleInstalledProperties(snapshots)
         }
     }
 
     private func handleInstalledProperties(_ properties: [InstalledExtensionPropertiesSnapshot]) {
-        currentRequest = nil
-        currentRequestKind = nil
-
-        guard let bundledVersion = bundledExtensionVersion else {
+        guard let bundledVersion = Bundle.main.bundledEndpointExtensionVersion else {
             return
         }
 
@@ -275,44 +276,16 @@ extension SystemExtensionInstaller: OSSystemExtensionRequestDelegate {
         }
 
         let hasBundledVersion = activeProperties.contains {
-            $0.bundleShortVersion == bundledVersion.shortVersion
-                && $0.bundleVersion == bundledVersion.buildVersion
+            $0.bundleShortVersion == bundledVersion.shortVersion && $0.bundleVersion == bundledVersion.build
         }
 
         if !hasBundledVersion {
             let installed = activeProperties
-                .map { "\($0.bundleShortVersion)/\($0.bundleVersion)" }
+                .map { MacFSWComponentVersion(shortVersion: $0.bundleShortVersion, build: $0.bundleVersion).description }
                 .joined(separator: ", ")
-            publish(
-                .activating,
-                "Updating Endpoint Extension from \(installed) to \(bundledVersion.shortVersion)/\(bundledVersion.buildVersion)."
-            )
-            submitted = false
+            onUpdateStarted?(installed, bundledVersion.description)
+            publish(.activating, "Updating Endpoint Extension from \(installed) to \(bundledVersion).")
             activate()
         }
     }
-
-    private var bundledExtensionVersion: (shortVersion: String, buildVersion: String)? {
-        let extensionURL = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Library/SystemExtensions")
-            .appendingPathComponent("\(extensionIdentifier).systemextension")
-            .appendingPathComponent("Contents/Info.plist")
-
-        guard
-            let dictionary = NSDictionary(contentsOf: extensionURL),
-            let shortVersion = dictionary["CFBundleShortVersionString"] as? String,
-            let buildVersion = dictionary["CFBundleVersion"] as? String
-        else {
-            return nil
-        }
-
-        return (shortVersion, buildVersion)
-    }
-}
-
-private func userFacingMessage(_ error: Error) -> String {
-    if let localized = error as? LocalizedError, let description = localized.errorDescription {
-        return description
-    }
-    return String(describing: error)
 }

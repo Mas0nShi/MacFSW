@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.1
 
 import PackageDescription
 
@@ -13,27 +13,24 @@ let package = Package(
         .library(name: "MacFSWSystemExtension", targets: ["MacFSWSystemExtension"]),
         .executable(name: "MacFSWApp", targets: ["MacFSWApp"]),
         .executable(name: "MacFSWEndpointExtension", targets: ["MacFSWEndpointExtension"]),
+        .executable(name: "macfsw", targets: ["MacFSWCLI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
         .package(url: "https://github.com/Lakr233/MarkdownView", from: "3.6.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.0"),
     ],
     targets: [
         .target(
             name: "MacFSWCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
-            ],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
             ]
         ),
         .target(
             name: "MacFSWAnalysis",
             dependencies: ["MacFSWCore"],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ],
             linkerSettings: [
                 .linkedFramework("Security")
             ]
@@ -48,9 +45,6 @@ let package = Package(
             resources: [
                 .process("Resources/MacFSW-AppIcon.icns"),
             ],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ],
             linkerSettings: [
                 .linkedFramework("Security"),
                 .linkedFramework("SystemExtensions")
@@ -59,9 +53,6 @@ let package = Package(
         .target(
             name: "MacFSWSystemExtension",
             dependencies: ["MacFSWCore"],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ],
             linkerSettings: [
                 .linkedFramework("Security"),
                 .linkedLibrary("EndpointSecurity"),
@@ -71,13 +62,22 @@ let package = Package(
         .executableTarget(
             name: "MacFSWEndpointExtension",
             dependencies: ["MacFSWSystemExtension"],
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ],
             linkerSettings: [
                 .linkedFramework("Security"),
                 .linkedLibrary("EndpointSecurity"),
                 .linkedLibrary("bsm")
+            ]
+        ),
+        .target(
+            name: "MacFSWCommands",
+            dependencies: ["MacFSWCore"]
+        ),
+        .executableTarget(
+            name: "MacFSWCLI",
+            dependencies: [
+                "MacFSWCommands",
+                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
         .testTarget(
@@ -91,6 +91,17 @@ let package = Package(
         .testTarget(
             name: "MacFSWAppTests",
             dependencies: ["MacFSWApp"]
+        ),
+        .testTarget(
+            name: "MacFSWCommandsTests",
+            dependencies: ["MacFSWCommands"]
+        ),
+        .testTarget(
+            name: "MacFSWCLITests",
+            dependencies: [
+                "MacFSWCLI",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
         ),
         .testTarget(
             name: "MacFSWSystemExtensionTests",

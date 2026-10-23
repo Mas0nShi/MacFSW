@@ -1,24 +1,9 @@
-import AppKit
-import Combine
-import Darwin
-import MacFSWAnalysis
+import Foundation
 import MacFSWCore
-import SwiftUI
-import UniformTypeIdentifiers
 
-extension MacFSWAppCoordinator {
-    func refreshFilteredEvents(
-        using queryOverride: MacFSWEventQuery?,
-        allowAutoSelection: Bool = false
-    ) async {
-        let parsedQuery: MacFSWEventQuery
-        if let queryOverride {
-            parseCurrentQueryText()
-            parsedQuery = queryOverride
-        } else {
-            parsedQuery = parseCurrentQueryText().query
-        }
-        let query = queryWithSelectedProcessFilter(parsedQuery)
+extension MonitorStore {
+    func refreshFilteredEvents(allowAutoSelection: Bool = false) async {
+        let query = parseCurrentQueryText().query
         filterTask?.cancel()
         let generation = beginFilterRefresh()
         let store = eventStore
@@ -94,33 +79,29 @@ extension MacFSWAppCoordinator {
                 } else {
                     selectedEvent = nil
                 }
-                await MainActor.run {
-                    guard let self, self.queryGeneration == generation else {
-                        return
-                    }
-                    self.commitFilterRefresh(
-                        query: query,
-                        snapshot: snapshot,
-                        initialRange: initialRange,
-                        rows: rows,
-                        operationSummaries: [],
-                        selection: selection,
-                        selectedEvent: selectedEvent
-                    )
-                    self.refreshOperationSummaries(for: query, generation: generation)
-                    if let oldSnapshot, oldSnapshot.id != snapshot.id {
-                        self.retireSnapshot(oldSnapshot)
-                    }
+                guard let self, self.queryGeneration == generation else {
+                    return
+                }
+                self.commitFilterRefresh(
+                    query: query,
+                    snapshot: snapshot,
+                    initialRange: initialRange,
+                    rows: rows,
+                    operationSummaries: [],
+                    selection: selection,
+                    selectedEvent: selectedEvent
+                )
+                self.refreshOperationSummaries(for: query, generation: generation)
+                if let oldSnapshot, oldSnapshot.id != snapshot.id {
+                    self.retireSnapshot(oldSnapshot)
                 }
             } catch {
-                await MainActor.run {
-                    guard let self, self.queryGeneration == generation else {
-                        return
-                    }
-                    self.isApplyingFilter = false
-                    self.selectedEventIsLoading = false
-                    self.reportError(error)
+                guard let self, self.queryGeneration == generation else {
+                    return
                 }
+                self.isApplyingFilter = false
+                self.selectedEventIsLoading = false
+                self.reportError(error)
             }
         }
         filterTask = task
@@ -154,7 +135,7 @@ extension MacFSWAppCoordinator {
         activeSnapshot = snapshot
         totalMatchingEventCount = snapshot.totalCount
         self.visibleEventCount = snapshot.visibleCount
-        self.operationSummaries = self.operationSummaries(from: operationSummaries)
+        self.operationSummaries = OperationSummaryReducer.operationSummaries(from: operationSummaries)
 
         rowCache.removeAll(keepingCapacity: true)
         loadedRowPages.removeAll(keepingCapacity: true)
@@ -182,7 +163,6 @@ extension MacFSWAppCoordinator {
 
         if followMode == .live {
             unseenEventCount = 0
-            isViewingLiveEdge = true
         }
         isApplyingFilter = false
         lastUpdatedAt = Date()
@@ -198,22 +178,18 @@ extension MacFSWAppCoordinator {
                 guard !Task.isCancelled else {
                     return
                 }
-                await MainActor.run {
-                    guard let self, self.queryGeneration == generation else {
-                        return
-                    }
-                    self.operationSummaries = self.operationSummaries(from: summaries)
-                    self.operationSummaryTask = nil
-                    self.lastUpdatedAt = Date()
+                guard let self, self.queryGeneration == generation else {
+                    return
                 }
+                self.operationSummaries = OperationSummaryReducer.operationSummaries(from: summaries)
+                self.operationSummaryTask = nil
+                self.lastUpdatedAt = Date()
             } catch {
-                await MainActor.run {
-                    guard let self, self.queryGeneration == generation else {
-                        return
-                    }
-                    self.operationSummaryTask = nil
-                    self.reportError(error)
+                guard let self, self.queryGeneration == generation else {
+                    return
                 }
+                self.operationSummaryTask = nil
+                self.reportError(error)
             }
         }
     }
@@ -239,15 +215,7 @@ extension MacFSWAppCoordinator {
         let snapshotIDs = Array(retiredSnapshotIDs)
         retiredSnapshotIDs.removeAll(keepingCapacity: true)
         snapshotCleanupTask = nil
-        guard !snapshotIDs.isEmpty else {
-            return
-        }
-
-        do {
-            try await eventStore.deleteResultSnapshots(snapshotIDs)
-        } catch {
-            reportError(error)
-        }
+        await eventStore.deleteResultSnapshots(snapshotIDs)
     }
 
     func cancelSnapshotCleanup() {
@@ -256,34 +224,38 @@ extension MacFSWAppCoordinator {
         retiredSnapshotIDs.removeAll(keepingCapacity: true)
     }
 
-    func processSummary(for id: MacFSWProcessSummary.ID) -> MacFSWProcessSummary? {
-        processSidebarStore.summary(for: id)
+    /// The process the query pins with a `pid:` term, which the sidebar
+    /// highlights. Derived from the text, so it can never disagree with
+    /// the filter actually applied.
+    var pinnedPID: Int32? {
+        MacFSWQueryEditor.pinnedPID(in: queryText)
     }
 
-    func queryWithSelectedProcessFilter(_ baseQuery: MacFSWEventQuery) -> MacFSWEventQuery {
-        guard let selectedProcessID,
-              let summary = processSummary(for: selectedProcessID) else {
-            return baseQuery
-        }
-
-        var query = baseQuery
-        query.processIdentity = summary.filterIdentity
-        return query
+    /// Narrows the query to one process by replacing any top-level `pid:`
+    /// term, or clears that pin when `pid` is nil. Undoable like any other
+    /// programmatic edit of the query.
+    func pinProcess(_ pid: Int32?) {
+        let edited = MacFSWQueryEditor.editing(
+            queryText,
+            removing: MacFSWQueryEditor.isPIDTerm,
+            adding: pid.flatMap { MacFSWQueryEditor.term(.pid, String($0)) }.map { [$0] } ?? []
+        )
+        applyEditedQuery(edited)
     }
 
-    func pauseLiveView() {
-        guard followMode == .live else {
-            return
-        }
-        invalidateLiveRender()
-        followMode = .paused
+    /// Replaces the query text with `edited` as one undo step and applies it.
+    func applyEditedQuery(_ edited: String) {
+        dismissQuerySuggestions()
+        setQueryTextRegisteringUndo(edited)
+        clearEventSelection()
+        Task { await refreshFilteredEvents() }
     }
 
     func prepareEventSelection(row: Int) {
         guard row >= 0, row < visibleEventCount else {
             return
         }
-        pauseLiveView()
+        pauseFollowing()
     }
 
     func invalidateLiveRender() {
@@ -295,7 +267,7 @@ extension MacFSWAppCoordinator {
     func selectEvent(_ eventID: UUID?, row: Int? = nil) {
         selectedRow = row
         if row != nil || eventID != nil {
-            pauseLiveView()
+            pauseFollowing()
         }
         guard let eventID else {
             selectedEventID = nil
@@ -352,33 +324,24 @@ extension MacFSWAppCoordinator {
         let store = eventStore
         selectedEventLoadTask = Task { [weak self] in
             do {
-                guard !Task.isCancelled else {
-                    return
-                }
+                // Whoever cancels this load also bumps the load generation.
                 let event = try await store.event(id: eventID)
-                guard !Task.isCancelled else {
+                guard let self,
+                      self.queryGeneration == generation,
+                      self.selectedEventLoadGeneration == loadGeneration,
+                      self.selectedEventID == eventID else {
                     return
                 }
-                await MainActor.run {
-                    guard let self,
-                          self.queryGeneration == generation,
-                          self.selectedEventLoadGeneration == loadGeneration,
-                          self.selectedEventID == eventID else {
-                        return
-                    }
-                    self.selectedEvent = event
-                    self.selectedEventIsLoading = false
-                    self.selectedEventLoadTask = nil
-                }
+                self.selectedEvent = event
+                self.selectedEventIsLoading = false
+                self.selectedEventLoadTask = nil
             } catch {
-                await MainActor.run {
-                    guard let self, self.selectedEventLoadGeneration == loadGeneration else {
-                        return
-                    }
-                    self.selectedEventIsLoading = false
-                    self.selectedEventLoadTask = nil
-                    self.reportError(error)
+                guard let self, self.selectedEventLoadGeneration == loadGeneration else {
+                    return
                 }
+                self.selectedEventIsLoading = false
+                self.selectedEventLoadTask = nil
+                self.reportError(error)
             }
         }
     }
@@ -393,40 +356,30 @@ extension MacFSWAppCoordinator {
         let loadGeneration = nextSelectedEventLoadGeneration()
         selectedEventLoadTask = Task { [weak self] in
             do {
-                guard !Task.isCancelled else {
-                    return
-                }
                 let event = try await store.event(
                     in: snapshot,
                     visibleRow: row
                 )
-                guard !Task.isCancelled else {
+                guard let self,
+                      self.queryGeneration == generation,
+                      self.selectedEventLoadGeneration == loadGeneration,
+                      self.selectedRow == row else {
                     return
                 }
-                await MainActor.run {
-                    guard let self,
-                          self.queryGeneration == generation,
-                          self.selectedEventLoadGeneration == loadGeneration,
-                          self.selectedRow == row else {
-                        return
-                    }
-                    self.selectedEvent = event
-                    self.selectedEventID = event?.id
-                    self.selectedEventIsLoading = false
-                    self.selectedEventLoadTask = nil
-                }
+                self.selectedEvent = event
+                self.selectedEventID = event?.id
+                self.selectedEventIsLoading = false
+                self.selectedEventLoadTask = nil
             } catch {
-                await MainActor.run {
-                    guard let self,
-                          self.queryGeneration == generation,
-                          self.selectedEventLoadGeneration == loadGeneration,
-                          self.selectedRow == row else {
-                        return
-                    }
-                    self.selectedEventIsLoading = false
-                    self.selectedEventLoadTask = nil
-                    self.reportError(error)
+                guard let self,
+                      self.queryGeneration == generation,
+                      self.selectedEventLoadGeneration == loadGeneration,
+                      self.selectedRow == row else {
+                    return
                 }
+                self.selectedEventIsLoading = false
+                self.selectedEventLoadTask = nil
+                self.reportError(error)
             }
         }
     }

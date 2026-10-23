@@ -2,17 +2,10 @@ import Darwin
 import SwiftUI
 
 struct SidebarView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarPageSwitcher()
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
-            .padding(.bottom, 10)
-
-            Divider()
-
             ProcessFilterPane()
                 .frame(maxHeight: .infinity)
 
@@ -20,91 +13,46 @@ struct SidebarView: View {
 
             OperationStatsPane()
 
-            Divider()
+            // Ready is the normal state and lives in the status bar; the
+            // card appears only when the extension needs the user.
+            if extensionNeedsAttention {
+                Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                SidebarSectionHeader("System Extension")
-                SystemExtensionStatusView()
+                VStack(alignment: .leading, spacing: 8) {
+                    SidebarSectionHeader("System Extension")
+                    SystemExtensionStatusView()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .transition(.opacity)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
         }
+        .animation(.easeInOut(duration: 0.16), value: extensionNeedsAttention)
         .background(.bar)
     }
 }
 
-struct SidebarPageSwitcher: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(MacFSWNavigationPage.allCases) { page in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.16)) {
-                        model.selectedPage = page
-                    }
-                } label: {
-                    SidebarPageSwitcherItem(
-                        page: page,
-                        isSelected: model.selectedPage == page
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .frame(height: 34)
-        .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-struct SidebarPageSwitcherItem: View {
-    let page: MacFSWNavigationPage
-    let isSelected: Bool
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: page.symbolName)
-                .font(.system(size: 12, weight: .medium))
-            Text(page.title)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.86)
-            if page.isBeta {
-                MacFSWBetaBadge()
-            }
-        }
-        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(background, in: RoundedRectangle(cornerRadius: 6))
-        .contentShape(RoundedRectangle(cornerRadius: 6))
-        .onHover { isHovering = $0 }
-        .animation(.easeInOut(duration: 0.14), value: isHovering)
-        .animation(.easeInOut(duration: 0.14), value: isSelected)
-    }
-
-    private var background: Color {
-        if isSelected {
-            return Color.accentColor.opacity(0.16)
-        }
-        if isHovering {
-            return Color.primary.opacity(0.07)
-        }
-        return .clear
+private extension SidebarView {
+    var extensionNeedsAttention: Bool {
+        let status = model.extensionStatus
+        return status.installState != .ready
+            || status.isRunningOutdatedExtension
+            || status.completedUpdate != nil
+            || model.session.captureHealth.fullDiskAccessHint
     }
 }
 
 struct ProcessFilterPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
+        @Bindable var processSidebar = model.processSidebar
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     SidebarSectionHeader("Processes")
                     Spacer()
-                    Text("\(model.filteredProcessSummaries.count)")
+                    Text("\(model.processSidebar.filteredProcessSummaries.count)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -117,15 +65,15 @@ struct ProcessFilterPane: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
 
-            TextField("Filter process or signing", text: $model.processSearchText)
+            TextField("Find in process list", text: $processSidebar.processSearchText)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal, 12)
 
-            Toggle(isOn: $model.includeExitedProcesses) {
+            Toggle(isOn: $processSidebar.includeExitedProcesses) {
                 HStack(spacing: 6) {
                     Text("Include Exited")
-                    if model.filteredExitedProcessCount > 0 {
-                        Text("\(model.filteredExitedProcessCount)")
+                    if model.processSidebar.filteredExitedProcessCount > 0 {
+                        Text("\(model.processSidebar.filteredExitedProcessCount)")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -135,9 +83,9 @@ struct ProcessFilterPane: View {
             .font(.caption)
             .padding(.horizontal, 12)
 
-            if model.selectedPage == .monitor, model.selectedProcessID != nil {
+            if model.selectedPage == .monitor, model.monitor.pinnedPID != nil {
                 Button {
-                    model.clearProcessFilter()
+                    model.monitor.pinProcess(nil)
                 } label: {
                     Label("Clear Process Filter", systemImage: "xmark.circle")
                 }
@@ -145,7 +93,7 @@ struct ProcessFilterPane: View {
                 .padding(.horizontal, 12)
             }
 
-            if model.filteredProcessGroups.isEmpty {
+            if model.processSidebar.filteredProcessGroups.isEmpty {
                 Text("No process events")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -156,19 +104,19 @@ struct ProcessFilterPane: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(model.filteredProcessGroups) { group in
+                        ForEach(model.processSidebar.filteredProcessGroups) { group in
                             if group.instanceCount > 1 {
                                 Button {
-                                    model.toggleProcessGroup(group.id)
+                                    model.processSidebar.toggleProcessGroup(group.id)
                                 } label: {
                                     ProcessGroupRow(
                                         group: group,
-                                        isExpanded: model.expandedProcessGroupIDs.contains(group.id)
+                                        isExpanded: model.processSidebar.expandedProcessGroupIDs.contains(group.id)
                                     )
                                 }
                                 .buttonStyle(.plain)
 
-                                if model.expandedProcessGroupIDs.contains(group.id) {
+                                if model.processSidebar.expandedProcessGroupIDs.contains(group.id) {
                                     ForEach(group.summaries) { summary in
                                         Button {
                                             model.selectSidebarProcess(summary)
@@ -212,9 +160,9 @@ struct ProcessFilterPane: View {
     private func isSelected(_ summary: MacFSWProcessSummary) -> Bool {
         switch model.selectedPage {
         case .monitor:
-            model.selectedProcessID == summary.id
+            model.monitor.pinnedPID == summary.pid
         case .analysis:
-            model.selectedAnalysisProcessID == summary.id
+            model.analysis.selectedProcessID == summary.id
         }
     }
 }

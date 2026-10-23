@@ -20,6 +20,12 @@ final class MacFSWAnalysisTests: XCTestCase {
 
             XCTAssertEqual(urlRequest.url?.absoluteString, "https://api.example.test\(endpoint.rawValue)")
             XCTAssertEqual(urlRequest.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+            XCTAssertEqual(urlRequest.value(forHTTPHeaderField: "Accept"), "text/event-stream")
+            XCTAssertEqual(urlRequest.value(forHTTPHeaderField: "Cache-Control"), "no-cache")
+            XCTAssertEqual(
+                urlRequest.value(forHTTPHeaderField: "Accept-Encoding"), "identity",
+                "streaming requests must opt out of gzip so SSE frames aren't buffered per compression frame"
+            )
 
             let body = try XCTUnwrap(urlRequest.httpBody)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
@@ -112,6 +118,51 @@ final class MacFSWAnalysisTests: XCTestCase {
         XCTAssertFalse(raw.contains("apiKey"))
     }
 
+    func testLLMSettingsDecodesLegacyBlobWithNewDefaults() throws {
+        let legacy = #"""
+        {"endpoint":"/v1/chat/completions","baseURL":"https://x","model":"gpt-4","maxEvents":500,"tokenBudget":8000,"timeoutSeconds":30,"streamResponses":true}
+        """#
+        let settings = try JSONDecoder().decode(MacFSWLLMSettings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(settings.outputLanguage, .english)
+        XCTAssertEqual(settings.promptEventCharacterBudget, 120_000)
+        XCTAssertEqual(settings.model, "gpt-4")
+    }
+
+    func testLLMSettingsPersistsOutputLanguageAndBudget() throws {
+        let settings = MacFSWLLMSettings(
+            outputLanguage: .simplifiedChinese,
+            promptEventCharacterBudget: 80_000
+        )
+        let encoded = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(MacFSWLLMSettings.self, from: encoded)
+        XCTAssertEqual(decoded.outputLanguage, .simplifiedChinese)
+        XCTAssertEqual(decoded.promptEventCharacterBudget, 80_000)
+    }
+
+    func testSettingsStorePromptTemplateStateRoundTrip() throws {
+        let suiteName = "MacFSWAnalysisTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let store = MacFSWSettingsStore(defaults: defaults)
+
+        XCTAssertEqual(store.loadPromptTemplateState(), MacFSWAnalysisPromptTemplateState())
+
+        let custom = MacFSWAnalysisPromptTemplate(
+            name: "Custom",
+            summary: "s",
+            systemPromptTemplate: "sys",
+            userPromptTemplate: "user"
+        )
+        let state = MacFSWAnalysisPromptTemplateState(
+            customTemplates: [custom],
+            selectedTemplateID: custom.id
+        )
+        try store.savePromptTemplateState(state)
+        XCTAssertEqual(store.loadPromptTemplateState(), state)
+    }
+
     func testHTTPErrorDetailsExtractProviderMessageWithoutLosingRawBody() {
         let body = #"{"error":{"type":"http_error","message":"当前用户、用户组无权限访问该模型","code":"forbidden"}}"#
         let details = MacFSWLLMHTTPErrorDetails(statusCode: 403, body: body)
@@ -123,24 +174,26 @@ final class MacFSWAnalysisTests: XCTestCase {
         XCTAssertTrue(details.diagnosticText.contains(body))
     }
 
+    // Uses the legacy store: unsigned test runners lack the entitlement the
+    // data-protection keychain requires, and the wrapper logic is shared.
     func testKeychainWrapperReadsWritesAndDeletesAPIKey() throws {
         let service = "com.macfsw.tests.llm.\(UUID().uuidString)"
         let account = "default"
-        try? MacFSWKeychain.delete(service: service, account: account)
+        try? MacFSWKeychain.delete(service: service, account: account, in: .legacyFile)
         addTeardownBlock {
-            try? MacFSWKeychain.delete(service: service, account: account)
+            try? MacFSWKeychain.delete(service: service, account: account, in: .legacyFile)
         }
 
-        XCTAssertNil(try MacFSWKeychain.read(service: service, account: account))
+        XCTAssertNil(try MacFSWKeychain.read(service: service, account: account, in: .legacyFile))
 
-        try MacFSWKeychain.save("first-key", service: service, account: account)
-        XCTAssertEqual(try MacFSWKeychain.read(service: service, account: account), "first-key")
+        try MacFSWKeychain.save("first-key", service: service, account: account, in: .legacyFile)
+        XCTAssertEqual(try MacFSWKeychain.read(service: service, account: account, in: .legacyFile), "first-key")
 
-        try MacFSWKeychain.save("second-key", service: service, account: account)
-        XCTAssertEqual(try MacFSWKeychain.read(service: service, account: account), "second-key")
+        try MacFSWKeychain.save("second-key", service: service, account: account, in: .legacyFile)
+        XCTAssertEqual(try MacFSWKeychain.read(service: service, account: account, in: .legacyFile), "second-key")
 
-        try MacFSWKeychain.delete(service: service, account: account)
-        XCTAssertNil(try MacFSWKeychain.read(service: service, account: account))
+        try MacFSWKeychain.delete(service: service, account: account, in: .legacyFile)
+        XCTAssertNil(try MacFSWKeychain.read(service: service, account: account, in: .legacyFile))
     }
 
     func testPayloadBuilderOrdersRecentEventsAndIncludesOperationParameters() {
@@ -181,13 +234,13 @@ final class MacFSWAnalysisTests: XCTestCase {
         let prepared = MacFSWAnalysisPayloadBuilder.build(
             process: context,
             events: events,
-            totalEventCount: 10,
-            maxEventSamples: 3
+            totalEventCount: 10
         )
 
-        XCTAssertEqual(prepared.eventCount, 10)
-        XCTAssertEqual(prepared.payloadEventCount, 3)
-        XCTAssertTrue(prepared.userPrompt.contains("mode 0644"))
+        XCTAssertEqual(prepared.totalEventCount, 10)
+        XCTAssertEqual(prepared.fetchedEventCount, 3)
+        XCTAssertEqual(prepared.sampledEventCount, 3)
+        XCTAssertTrue(prepared.userPrompt.contains("rwxr-xr-x → rw-r--r-- (0644)"))
         XCTAssertTrue(prepared.userPrompt.contains("source=/tmp/src"))
         XCTAssertLessThan(
             prepared.userPrompt.range(of: "seq=1")!.lowerBound,

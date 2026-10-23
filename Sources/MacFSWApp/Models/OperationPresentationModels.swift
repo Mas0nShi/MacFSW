@@ -9,7 +9,6 @@ enum MacFSWOperationBucket: String, CaseIterable, Identifiable, Sendable {
     case delete
     case metadata
     case link
-    case unknown
 
     var id: String { rawValue }
 
@@ -22,7 +21,6 @@ enum MacFSWOperationBucket: String, CaseIterable, Identifiable, Sendable {
         case .delete: "DELETE"
         case .metadata: "METADATA"
         case .link: "LINK"
-        case .unknown: "UNKNOWN"
         }
     }
 
@@ -35,7 +33,6 @@ enum MacFSWOperationBucket: String, CaseIterable, Identifiable, Sendable {
         case .delete: "trash"
         case .metadata: "slider.horizontal.3"
         case .link: "link"
-        case .unknown: "questionmark.circle"
         }
     }
 
@@ -48,7 +45,6 @@ enum MacFSWOperationBucket: String, CaseIterable, Identifiable, Sendable {
         case .delete: .red
         case .metadata: .orange
         case .link: .mint
-        case .unknown: .secondary
         }
     }
 
@@ -68,8 +64,6 @@ enum MacFSWOperationBucket: String, CaseIterable, Identifiable, Sendable {
             .metadata
         case .link:
             .link
-        case .unknown:
-            .unknown
         }
     }
 }

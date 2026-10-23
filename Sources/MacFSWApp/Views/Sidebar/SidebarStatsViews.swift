@@ -1,69 +1,7 @@
 import SwiftUI
 
-struct SidebarNavigationRow: View {
-    let page: MacFSWNavigationPage
-    let isSelected: Bool
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: page.symbolName)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(.primary)
-                .frame(width: 20)
-            Text(page.title)
-                .font(.system(size: 15, weight: .medium))
-            Spacer(minLength: 0)
-        }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 34)
-            .padding(.horizontal, 10)
-            .background(rowBackground, in: RoundedRectangle(cornerRadius: 7))
-            .contentShape(RoundedRectangle(cornerRadius: 7))
-            .onHover { isHovering = $0 }
-            .animation(.easeInOut(duration: 0.14), value: isHovering)
-            .animation(.easeInOut(duration: 0.14), value: isSelected)
-    }
-
-    private var rowBackground: Color {
-        if isSelected {
-            return Color.accentColor.opacity(0.16)
-        }
-        if isHovering {
-            return Color.primary.opacity(0.06)
-        }
-        return .clear
-    }
-}
-
-struct CaptureSidebarStatusView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                RecordingIndicatorView(isRecording: model.captureState == .recording)
-                Text(model.statusText)
-                    .font(.callout.weight(.medium))
-                Spacer()
-                if model.captureState == .recording {
-                    Label(model.followMode.title, systemImage: model.followMode.symbolName)
-                        .font(.caption)
-                        .foregroundStyle(model.followMode == .live ? .green : .secondary)
-                }
-            }
-
-            Text(model.captureStatusDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 struct OperationStatsPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     private let buckets: [MacFSWOperationBucket] = [
         .read,
@@ -76,29 +14,27 @@ struct OperationStatsPane: View {
     ]
 
     private var summaryByBucket: [MacFSWOperationBucket: MacFSWOperationSummary] {
-        Dictionary(uniqueKeysWithValues: model.operationSummaries.map { ($0.bucket, $0) })
+        Dictionary(uniqueKeysWithValues: model.monitor.operationSummaries.map { ($0.bucket, $0) })
     }
 
-    private var rankedSummaries: [MacFSWOperationSummary] {
-        buckets.map { bucket in
-            summaryByBucket[bucket] ?? MacFSWOperationSummary(bucket: bucket, eventCount: 0)
-        }
-        .sorted { lhs, rhs in
-            if lhs.eventCount != rhs.eventCount {
-                return lhs.eventCount > rhs.eventCount
+    /// Ranked by count, but holding through near-ties and moving at most
+    /// once a second (see `StableRanking`): while recording, counts change
+    /// several times a second.
+    @State private var order = StableRanking<MacFSWOperationBucket>()
+
+    private func summaries(in order: [MacFSWOperationBucket]) -> [MacFSWOperationSummary] {
+        let byBucket = summaryByBucket
+        return (order.isEmpty ? buckets : order).map { byBucket[$0] ?? MacFSWOperationSummary(bucket: $0, eventCount: 0) }
+    }
+
+    private var ranked: [(id: MacFSWOperationBucket, count: Int)] {
+        summaries(in: buckets)
+            .sorted { lhs, rhs in
+                lhs.eventCount != rhs.eventCount
+                    ? lhs.eventCount > rhs.eventCount
+                    : bucketRank(lhs.bucket) < bucketRank(rhs.bucket)
             }
-            return bucketRank(lhs.bucket) < bucketRank(rhs.bucket)
-        }
-    }
-
-    private var total: Int {
-        rankedSummaries.reduce(0) { $0 + $1.eventCount }
-    }
-
-    private var animationSignature: String {
-        rankedSummaries
-            .map { "\($0.id):\($0.eventCount)" }
-            .joined(separator: "|")
+            .map { ($0.bucket, $0.eventCount) }
     }
 
     private func bucketRank(_ bucket: MacFSWOperationBucket) -> Int {
@@ -106,6 +42,8 @@ struct OperationStatsPane: View {
     }
 
     var body: some View {
+        let summaries = summaries(in: order.order)
+        let total = summaries.reduce(0) { $0 + $1.eventCount }
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 SidebarSectionHeader("Operations")
@@ -116,12 +54,31 @@ struct OperationStatsPane: View {
             }
 
             VStack(spacing: 6) {
-                ForEach(rankedSummaries) { summary in
+                ForEach(summaries) { summary in
                     OperationStatRow(summary: summary, total: total)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .animation(.easeInOut(duration: 0.22), value: animationSignature)
+        }
+        .task(id: model.monitor.operationSummaries) {
+            var retryAfter: Duration?
+            repeat {
+                if let delay = retryAfter {
+                    try? await Task.sleep(for: delay)
+                    guard !Task.isCancelled else {
+                        return
+                    }
+                }
+                var next = order
+                let update = next.update(ranked)
+                if update.moved {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        order = next
+                    }
+                } else {
+                    order = next
+                }
+                retryAfter = update.retryAfter
+            } while retryAfter != nil
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -160,10 +117,13 @@ struct OperationStatRow: View {
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Color.primary.opacity(0.08))
+                    // Only the bar animates; animating the whole row would
+                    // re-lay-out its text on every frame.
                     Capsule()
                         .fill(summary.bucket.color.opacity(0.72))
-                        .frame(width: ratio > 0 ? max(2, proxy.size.width * ratio) : 0)
-                        .animation(.easeInOut(duration: 0.22), value: ratio)
+                        .animation(.easeOut(duration: 0.2)) { bar in
+                            bar.frame(width: ratio > 0 ? max(2, proxy.size.width * ratio) : 0)
+                        }
                 }
             }
             .frame(height: 4)

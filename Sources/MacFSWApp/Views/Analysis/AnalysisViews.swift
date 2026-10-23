@@ -2,7 +2,7 @@ import MarkdownView
 import SwiftUI
 
 struct AnalysisResultsView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         HStack(spacing: 0) {
@@ -24,7 +24,7 @@ struct AnalysisResultsView: View {
 }
 
 struct AnalysisHeaderView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         HStack(spacing: 12) {
@@ -34,7 +34,7 @@ struct AnalysisHeaderView: View {
                         .font(.headline)
                     MacFSWBetaBadge()
                 }
-                Text(model.analysisStatusText)
+                Text(model.analysis.statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -52,9 +52,32 @@ struct AnalysisHeaderView: View {
                 .foregroundStyle(.secondary)
             }
 
-            if model.isAnalysisRunning {
+            Picker("Template", selection: Binding(
+                get: { model.analysisTemplates.selectedTemplateID },
+                set: { model.analysisTemplates.selectedTemplateID = $0 }
+            )) {
+                Section("Built-in") {
+                    ForEach(model.analysisTemplates.allTemplates.filter(\.isBuiltIn)) { template in
+                        Text(template.name).tag(template.id)
+                    }
+                }
+                let custom = model.analysisTemplates.allTemplates.filter { !$0.isBuiltIn }
+                if !custom.isEmpty {
+                    Section("Custom") {
+                        ForEach(custom) { template in
+                            Text(template.name).tag(template.id)
+                        }
+                    }
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: 200)
+            .disabled(model.analysis.isRunning)
+
+            if model.analysis.isRunning {
                 Button {
-                    model.cancelAnalysis()
+                    model.analysis.cancelAnalysis()
                 } label: {
                     Label("Cancel", systemImage: "xmark.circle")
                 }
@@ -68,11 +91,11 @@ struct AnalysisHeaderView: View {
             }
 
             Button {
-                model.clearAnalysisHistory()
+                model.analysis.clearHistory()
             } label: {
                 Label("Clear History", systemImage: "trash")
             }
-            .disabled(model.analysisResults.isEmpty)
+            .disabled(model.analysis.results.isEmpty)
         }
         .buttonStyle(.bordered)
         .padding(.horizontal, 16)
@@ -85,7 +108,7 @@ struct AnalysisHeaderView: View {
 }
 
 struct AnalysisHistorySidebar: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -94,7 +117,7 @@ struct AnalysisHistorySidebar: View {
                     HStack {
                         SidebarSectionHeader("Reports")
                         Spacer()
-                        Text("\(model.analysisResults.count)")
+                        Text("\(model.analysis.results.count)")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -105,7 +128,7 @@ struct AnalysisHistorySidebar: View {
                         .lineLimit(1)
                 }
 
-                if model.analysisResults.isEmpty {
+                if model.analysis.results.isEmpty {
                     Text("No reports")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -114,13 +137,13 @@ struct AnalysisHistorySidebar: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 8) {
-                            ForEach(model.analysisResults) { result in
+                            ForEach(model.analysis.results) { result in
                                 Button {
                                     model.selectAnalysis(result)
                                 } label: {
                                     AnalysisHistoryRow(
                                         result: result,
-                                        isSelected: model.selectedAnalysisID == result.id
+                                        isSelected: model.analysis.selectedResultID == result.id
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -152,7 +175,7 @@ struct AnalysisHistoryRow: View {
             Text(result.createdAt.formatted(date: .omitted, time: .standard))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-            Text("\(result.payloadEventCount)/\(result.eventCount) events · \(result.operationCount) ops")
+            Text("\(result.sampledEventCount)/\(result.totalEventCount) events · \(result.operationCount) ops")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -167,28 +190,28 @@ struct AnalysisHistoryRow: View {
 }
 
 struct AnalysisReportPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         Group {
-            if model.isAnalysisRunning || !model.streamingAnalysisMarkdown.isEmpty {
+            if model.analysis.isRunning || !model.analysis.streamingMarkdown.isEmpty {
                 AnalysisMarkdownReportView(
                     title: model.selectedAnalysisProcess?.displayName ?? "Running Analysis",
                     subtitle: "Streaming response",
-                    eventCount: nil,
+                    eventsLabel: nil,
                     pathCount: nil,
                     operationCount: nil,
-                    markdown: model.streamingAnalysisMarkdown,
-                    isStreaming: model.isAnalysisRunning,
-                    error: model.analysisRunError
+                    markdown: model.analysis.streamingMarkdown,
+                    isStreaming: model.analysis.isRunning,
+                    error: model.analysis.runError
                 )
-            } else if let error = model.analysisRunError {
+            } else if let error = model.analysis.runError {
                 AnalysisErrorPane(error: error)
-            } else if let result = model.selectedAnalysis {
+            } else if let result = model.analysis.selectedAnalysis {
                 AnalysisMarkdownReportView(
                     title: result.processDisplayName,
-                    subtitle: "\(result.scope) · \(result.providerSummary) · \(String(format: "%.1fs", result.durationSeconds))",
-                    eventCount: result.eventCount,
+                    subtitle: "\(result.scope) · \(result.providerSummary) · \(result.templateName) · \(String(format: "%.1fs", result.durationSeconds))",
+                    eventsLabel: "\(result.sampledEventCount)/\(result.totalEventCount)",
                     pathCount: result.pathCount,
                     operationCount: result.operationCount,
                     markdown: result.markdown,
@@ -219,7 +242,9 @@ struct AnalysisReportPane: View {
 struct AnalysisMarkdownReportView: View {
     let title: String
     let subtitle: String
-    let eventCount: Int?
+    /// Rendered as "sampled/total" so the card is honest about how much of
+    /// the session the model actually saw.
+    let eventsLabel: String?
     let pathCount: Int?
     let operationCount: Int?
     let markdown: String
@@ -246,9 +271,9 @@ struct AnalysisMarkdownReportView: View {
                             .lineLimit(1)
                     }
 
-                    if let eventCount, let pathCount, let operationCount {
+                    if let eventsLabel, let pathCount, let operationCount {
                         HStack(spacing: 10) {
-                            AnalysisStat(title: "Events", value: "\(eventCount)")
+                            AnalysisStat(title: "Events", value: eventsLabel)
                             AnalysisStat(title: "Paths", value: "\(pathCount)")
                             AnalysisStat(title: "Operations", value: "\(operationCount)")
                         }

@@ -1,20 +1,24 @@
 import Foundation
+import Observation
 import MacFSWAnalysis
 import MacFSWCore
 
 @MainActor
-final class AnalysisStore: ObservableObject {
-    @Published var selectedProcessID: MacFSWProcessSummary.ID?
-    @Published var isRunning = false
-    @Published var streamingMarkdown = ""
-    @Published var statusText = "Select a process to analyze."
-    @Published var runError: MacFSWConnectionTestError?
-    @Published var results: [MacFSWAnalysisResult] = []
-    @Published var selectedResultID: MacFSWAnalysisResult.ID?
-    @Published var connectionTestState: MacFSWConnectionTestState = .idle
+@Observable
+final class AnalysisStore {
+    var selectedProcessID: MacFSWProcessSummary.ID?
+    var isRunning = false
+    var streamingMarkdown = ""
+    var statusText = "Select a process to analyze."
+    var runError: MacFSWConnectionTestError?
+    var results: [MacFSWAnalysisResult] = []
+    var selectedResultID: MacFSWAnalysisResult.ID?
+    var connectionTestState: MacFSWConnectionTestState = .idle
 
     private let llmClient: MacFSWLLMClient
+    @ObservationIgnored
     private var analysisTask: Task<Void, Never>?
+    @ObservationIgnored
     private var analysisGeneration = 0
 
     init(llmClient: MacFSWLLMClient) {
@@ -77,10 +81,6 @@ final class AnalysisStore: ObservableObject {
         runError = nil
     }
 
-    func clearProcessSelection() {
-        selectedProcessID = nil
-    }
-
     func cancelTask() {
         analysisTask?.cancel()
         analysisTask = nil
@@ -99,6 +99,7 @@ final class AnalysisStore: ObservableObject {
         target: MacFSWProcessSummary?,
         eventStore: MacFSWSQLiteEventStore,
         settings: MacFSWLLMSettings,
+        template: MacFSWAnalysisPromptTemplate,
         reportError: @MainActor @escaping (Error) -> Void
     ) {
         guard let target else {
@@ -143,14 +144,15 @@ final class AnalysisStore: ObservableObject {
                 let prepared = MacFSWAnalysisPayloadBuilder.build(
                     process: context,
                     events: events,
-                    totalEventCount: total
+                    totalEventCount: total,
+                    template: template,
+                    outputLanguageName: settings.outputLanguage.promptName(resolvingSystemWith: .current),
+                    eventSampleCharacterBudget: settings.promptEventCharacterBudget
                 )
-                await MainActor.run {
-                    guard let self, self.analysisGeneration == generation else {
-                        return
-                    }
-                    self.statusText = "Analyzing \(target.displayName)..."
+                guard let self, self.analysisGeneration == generation else {
+                    return
                 }
+                self.statusText = "Analyzing \(target.displayName)..."
 
                 let request = MacFSWLLMRequest(
                     settings: settings,
@@ -158,17 +160,42 @@ final class AnalysisStore: ObservableObject {
                     userPrompt: prepared.userPrompt
                 )
                 let stream = try await client.streamAnalysis(request: request)
-                var accumulated = ""
+                var buffer: [String] = []
+                var lastPublishedLength = 0
+                var lastPublishedAt = ContinuousClock.now - .seconds(1)
+                let coalesceWindow = Duration.milliseconds(16)
 
                 for try await delta in stream {
                     try Task.checkCancellation()
-                    accumulated += delta.text
-                    await MainActor.run {
-                        guard let self, self.analysisGeneration == generation else {
-                            return
-                        }
-                        self.streamingMarkdown = accumulated
+                    buffer.append(delta.text)
+                    let now = ContinuousClock.now
+                    // Publish the FIRST delta immediately so tokens appear as
+                    // soon as bytes land, then coalesce further deltas that
+                    // arrive within one display frame — MarkdownView reparses
+                    // the whole buffer on every input change, so back-to-back
+                    // updates within the same frame are pure waste. Slow
+                    // models still see each delta ship on arrival; fast
+                    // models get frame-rate batching for free.
+                    if now - lastPublishedAt < coalesceWindow {
+                        continue
                     }
+                    let joined = buffer.joined()
+                    guard joined.count != lastPublishedLength else {
+                        continue
+                    }
+                    lastPublishedLength = joined.count
+                    lastPublishedAt = now
+                    guard analysisGeneration == generation else {
+                        return
+                    }
+                    self.streamingMarkdown = joined
+                }
+                let accumulated = buffer.joined()
+                if accumulated.count != lastPublishedLength {
+                    guard analysisGeneration == generation else {
+                        return
+                    }
+                    self.streamingMarkdown = accumulated
                 }
 
                 let finalMarkdown = accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -181,38 +208,36 @@ final class AnalysisStore: ObservableObject {
                     durationSeconds: Date().timeIntervalSince(startedAt),
                     scope: "Selected process, current session",
                     providerSummary: "\(settings.endpoint.rawValue) · \(settings.model)",
-                    eventCount: prepared.eventCount,
-                    payloadEventCount: prepared.payloadEventCount,
+                    totalEventCount: prepared.totalEventCount,
+                    fetchedEventCount: prepared.fetchedEventCount,
+                    sampledEventCount: prepared.sampledEventCount,
                     pathCount: prepared.pathCount,
                     operationCount: prepared.operationCount,
+                    templateName: template.name,
                     markdown: finalMarkdown
                 )
-                await MainActor.run {
-                    guard let self, self.analysisGeneration == generation else {
-                        return
-                    }
-                    self.results.insert(result, at: 0)
-                    self.selectedResultID = result.id
-                    self.streamingMarkdown = ""
-                    self.isRunning = false
-                    self.analysisTask = nil
-                    self.statusText = "Completed \(target.displayName)."
+                guard analysisGeneration == generation else {
+                    return
                 }
+                self.results.insert(result, at: 0)
+                self.selectedResultID = result.id
+                self.streamingMarkdown = ""
+                self.isRunning = false
+                self.analysisTask = nil
+                self.statusText = "Completed \(target.displayName)."
             } catch {
-                await MainActor.run {
-                    guard let self, self.analysisGeneration == generation else {
-                        return
-                    }
-                    if ErrorPresentation.isCancellationError(error) {
-                        self.statusText = self.streamingMarkdown.isEmpty ? "Analysis cancelled." : "Analysis cancelled. Partial output is still visible."
-                    } else {
-                        self.statusText = ErrorPresentation.userFacingMessage(error)
-                        self.runError = Self.analysisError(from: error, settings: settings)
-                        reportError(error)
-                    }
-                    self.isRunning = false
-                    self.analysisTask = nil
+                guard let self, self.analysisGeneration == generation else {
+                    return
                 }
+                if ErrorPresentation.isCancellationError(error) {
+                    self.statusText = self.streamingMarkdown.isEmpty ? "Analysis cancelled." : "Analysis cancelled. Partial output is still visible."
+                } else {
+                    self.statusText = error.userFacingMessage
+                    self.runError = Self.analysisError(from: error, settings: settings)
+                    reportError(error)
+                }
+                self.isRunning = false
+                self.analysisTask = nil
             }
         }
     }
@@ -241,19 +266,15 @@ final class AnalysisStore: ObservableObject {
                         break
                     }
                 }
-                await MainActor.run {
-                    self?.connectionTestState = receivedText
-                        ? .succeeded("Connection OK")
-                        : .failed(MacFSWConnectionTestError(
-                            title: "No Text Returned",
-                            message: "The provider accepted the request but did not return text output.",
-                            diagnostic: "Endpoint: \(settings.endpoint.rawValue)\nModel: \(settings.model)\nBase URL: \(settings.baseURL)"
-                        ))
-                }
+                self?.connectionTestState = receivedText
+                    ? .succeeded("Connection OK")
+                    : .failed(MacFSWConnectionTestError(
+                        title: "No Text Returned",
+                        message: "The provider accepted the request but did not return text output.",
+                        diagnostic: "Endpoint: \(settings.endpoint.rawValue)\nModel: \(settings.model)\nBase URL: \(settings.baseURL)"
+                    ))
             } catch {
-                await MainActor.run {
-                    self?.connectionTestState = .failed(Self.connectionTestError(from: error, settings: settings))
-                }
+                self?.connectionTestState = .failed(Self.connectionTestError(from: error, settings: settings))
             }
         }
     }

@@ -1,8 +1,10 @@
 import Foundation
+import Observation
 
 @MainActor
-final class QueryHistoryStore: ObservableObject {
-    @Published private(set) var entries: [String] = []
+@Observable
+final class QueryHistoryStore {
+    private(set) var entries: [String] = []
 
     private let defaults: UserDefaults
     private static let entriesKey = "MacFSW.QueryHistory.v1"

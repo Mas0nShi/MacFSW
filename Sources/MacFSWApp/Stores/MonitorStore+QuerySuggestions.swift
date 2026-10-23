@@ -1,21 +1,21 @@
 import Foundation
 import MacFSWCore
 
-extension MacFSWAppCoordinator {
+extension MonitorStore {
     /// The single entry for parsing the command bar's text: every path that
     /// interprets `queryText` goes through here so the diagnostics shown in
     /// the UI can never drift from the query actually applied.
     @discardableResult
     func parseCurrentQueryText() -> MacFSWQueryParseResult {
         let result = MacFSWQueryParser.parseDetailed(queryText)
-        monitorStore.lastQueryParse = result
+        lastQueryParse = result
         queryDiagnostics = result.diagnostics
         return result
     }
 
     func queryHighlightRuns(for text: String) -> [QueryHighlighter.AttributeRun] {
         let result: MacFSWQueryParseResult
-        if let cached = monitorStore.lastQueryParse, cached.tokens.source == text {
+        if let cached = lastQueryParse, cached.tokens.source == text {
             result = cached
         } else {
             result = MacFSWQueryParser.parseDetailed(text)
@@ -32,19 +32,19 @@ extension MacFSWAppCoordinator {
     }
 
     func queryTextEdited() {
-        monitorStore.suppressSuggestionsForCurrentText = false
-        monitorStore.querySuggestionPreviewBasis = nil
+        suppressSuggestionsForCurrentText = false
+        querySuggestionPreviewBasis = nil
         parseCurrentQueryText()
         refreshQuerySuggestions()
     }
 
     func refreshQuerySuggestions() {
-        guard !monitorStore.suppressSuggestionsForCurrentText else {
+        guard !suppressSuggestionsForCurrentText else {
             return
         }
         var context = QuerySuggestionEngine.context(
-            from: processSidebarStore.processSummaries,
-            history: queryHistoryStore.entries
+            from: processSidebar.processSummaries,
+            history: queryHistory.entries
         )
         applyFacetCandidates(into: &context)
         querySuggestions = QuerySuggestionEngine.suggestions(for: queryText, context: context)
@@ -74,8 +74,8 @@ extension MacFSWAppCoordinator {
         }
 
         let key = prefixQuery.text + "\u{1F}" + descriptor.canonicalKey
-        if monitorStore.facetValueKey == key {
-            assignFacetValues(monitorStore.facetValues, for: descriptor.valueKind, into: &context)
+        if facetValueKey == key {
+            assignFacetValues(facetValues, for: descriptor.valueKind, into: &context)
             return
         }
         scheduleFacetPrefetch(key: key, field: descriptor.field, query: prefixQuery)
@@ -112,46 +112,46 @@ extension MacFSWAppCoordinator {
     }
 
     private func scheduleFacetPrefetch(key: String, field: MacFSWQueryField, query: MacFSWEventQuery) {
-        guard monitorStore.facetRequestKey != key else {
+        guard facetRequestKey != key else {
             return
         }
-        monitorStore.facetTask?.cancel()
-        monitorStore.facetRequestKey = key
+        facetTask?.cancel()
+        facetRequestKey = key
         let store = eventStore
-        monitorStore.facetTask = Task { [weak self] in
+        facetTask = Task { [weak self] in
             let values: [MacFSWFacetValue]?
             do {
                 values = try await store.distinctValues(for: field, matching: query, limit: 50)
             } catch {
                 values = nil
             }
-            guard !Task.isCancelled, let self, self.monitorStore.facetRequestKey == key else {
+            guard !Task.isCancelled, let self, self.facetRequestKey == key else {
                 return
             }
-            self.monitorStore.facetTask = nil
+            self.facetTask = nil
             guard let values else {
                 // Failed fetch: fall back to the full candidate lists and
                 // allow a later retry.
-                self.monitorStore.facetRequestKey = nil
+                self.facetRequestKey = nil
                 return
             }
-            self.monitorStore.facetValues = values.map {
+            self.facetValues = values.map {
                 (value: $0.value, detail: $0.count == 1 ? "1 matching event" : "\($0.count) matching events")
             }
-            self.monitorStore.facetValueKey = key
+            self.facetValueKey = key
             self.refreshQuerySuggestions()
         }
     }
 
     private func cancelFacetPrefetch() {
-        monitorStore.facetTask?.cancel()
-        monitorStore.facetTask = nil
-        monitorStore.facetRequestKey = nil
+        facetTask?.cancel()
+        facetTask = nil
+        facetRequestKey = nil
     }
 
     func moveSuggestionHighlight(by delta: Int) {
         guard isQuerySuggestionListVisible else {
-            monitorStore.suppressSuggestionsForCurrentText = false
+            suppressSuggestionsForCurrentText = false
             refreshQuerySuggestions()
             if isQuerySuggestionListVisible {
                 previewSuggestion(at: QuerySuggestionEngine.nextHighlight(
@@ -190,8 +190,8 @@ extension MacFSWAppCoordinator {
         guard let index, querySuggestions.indices.contains(index) else {
             return
         }
-        if monitorStore.querySuggestionPreviewBasis == nil {
-            monitorStore.querySuggestionPreviewBasis = queryText
+        if querySuggestionPreviewBasis == nil {
+            querySuggestionPreviewBasis = queryText
         }
         queryText = querySuggestions[index].resultText
         scheduleQueryRefresh()
@@ -212,9 +212,9 @@ extension MacFSWAppCoordinator {
     /// undoable as one step: records the swap basis and bumps the commit
     /// serial the field observes.
     func setQueryTextRegisteringUndo(_ newText: String, undoingTo basisOverride: String? = nil) {
-        monitorStore.queryFillCommitBasis = basisOverride ?? queryText
-        monitorStore.queryFillCommitSerial += 1
-        monitorStore.querySuggestionPreviewBasis = nil
+        queryFillCommitBasis = basisOverride ?? queryText
+        queryFillCommitSerial += 1
+        querySuggestionPreviewBasis = nil
         queryText = newText
     }
 
@@ -231,12 +231,12 @@ extension MacFSWAppCoordinator {
         // not the last previewed candidate.
         setQueryTextRegisteringUndo(
             suggestion.resultText,
-            undoingTo: monitorStore.querySuggestionPreviewBasis
+            undoingTo: querySuggestionPreviewBasis
         )
         scheduleQueryRefresh()
         switch suggestion.kind {
         case .field:
-            monitorStore.suppressSuggestionsForCurrentText = false
+            suppressSuggestionsForCurrentText = false
             refreshQuerySuggestions()
         case .value, .keyword, .history:
             dismissQuerySuggestions()
@@ -246,19 +246,19 @@ extension MacFSWAppCoordinator {
     func dismissQuerySuggestions() {
         isQuerySuggestionListVisible = false
         querySuggestionHighlight = nil
-        monitorStore.querySuggestionPreviewBasis = nil
-        monitorStore.suppressSuggestionsForCurrentText = true
+        querySuggestionPreviewBasis = nil
+        suppressSuggestionsForCurrentText = true
         // Facet counts are only guaranteed fresh within one dropdown session.
         cancelFacetPrefetch()
-        monitorStore.facetValueKey = nil
-        monitorStore.facetValues = []
+        facetValueKey = nil
+        facetValues = []
     }
 
     /// Esc: restore what the user typed before Tab previewing, then close.
     /// The filter follows the restored text the same way it followed the
     /// preview.
     func cancelQuerySuggestions() {
-        if let basis = monitorStore.querySuggestionPreviewBasis {
+        if let basis = querySuggestionPreviewBasis {
             queryText = basis
             scheduleQueryRefresh()
         }
@@ -269,7 +269,7 @@ extension MacFSWAppCoordinator {
         dismissQuerySuggestions()
         let result = parseCurrentQueryText()
         if !result.query.text.isEmpty, result.query.expression != nil {
-            queryHistoryStore.record(result.query.text)
+            queryHistory.record(result.query.text)
         }
         Task {
             await refreshFilteredEvents()

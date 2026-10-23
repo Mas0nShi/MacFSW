@@ -19,20 +19,8 @@ public enum MacFSWEventType: String, Codable, CaseIterable, Identifiable, Sendab
     case setextattr
     case deleteextattr
     case utimes
-    case unknown
 
     public var id: String { rawValue }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let rawValue = try container.decode(String.self)
-        self = MacFSWEventType(rawValue: rawValue) ?? .unknown
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
 
     public var operationClass: MacFSWOperationClass {
         switch self {
@@ -46,13 +34,11 @@ public enum MacFSWEventType: String, Codable, CaseIterable, Identifiable, Sendab
             .delete
         case .chmod, .chown, .setflags, .setacl, .setextattr, .deleteextattr, .utimes:
             .metadata
-        case .unknown:
-            .unknown
         }
     }
 
     public var isMutation: Bool {
-        operationClass != .read && operationClass != .unknown
+        operationClass != .read
     }
 
     public static var defaultCaptureTypes: [MacFSWEventType] {
@@ -64,12 +50,7 @@ public enum MacFSWEventType: String, Codable, CaseIterable, Identifiable, Sendab
     }
 
     public var isTransportSafeCaptureType: Bool {
-        switch self {
-        case .unknown, .setflags:
-            false
-        default:
-            true
-        }
+        self != .setflags
     }
 
     private var isDefaultCaptureType: Bool {
@@ -83,7 +64,6 @@ public enum MacFSWOperationClass: String, Codable, CaseIterable, Identifiable, S
     case metadata
     case delete
     case link
-    case unknown
 
     public var id: String { rawValue }
 }
@@ -244,68 +224,6 @@ public struct MacFSWFileEvent: Identifiable, Codable, Equatable, Hashable, Senda
             sourcePath: sourcePath,
             parameters: parameters
         )
-    }
-
-    public static func operationDetailSummary(
-        eventType: MacFSWEventType,
-        sourcePath: String?,
-        parameters: [MacFSWEventParameter]
-    ) -> String {
-        func value(_ key: String) -> String? {
-            parameters.first { $0.key == key }?.value
-        }
-
-        func joined(_ parts: [String?]) -> String {
-            parts.compactMap { part in
-                guard let part, !part.isEmpty else {
-                    return nil
-                }
-                return part
-            }
-            .joined(separator: " · ")
-        }
-
-        switch eventType {
-        case .rename:
-            return sourcePath.map { "from \($0)" } ?? ""
-        case .clone, .copyfile, .link, .exchangedata:
-            return joined([
-                sourcePath.map { "from \($0)" },
-                value("copy_flags").map { "flags \($0)" },
-            ])
-        case .chmod:
-            return joined([
-                value("mode").map { "mode \($0)" },
-                value("current_mode").map { "was \($0)" },
-            ])
-        case .chown:
-            let currentOwner = [value("current_uid"), value("current_gid")]
-                .compactMap { $0 }
-                .joined(separator: "/")
-            return joined([
-                joined([value("uid").map { "uid \($0)" }, value("gid").map { "gid \($0)" }]),
-                currentOwner.isEmpty ? nil : "was \(currentOwner)",
-            ])
-        case .setflags:
-            return joined([
-                value("flags").map { "flags \($0)" },
-                value("current_flags").map { "was \($0)" },
-            ])
-        case .setacl:
-            return value("acl_action").map { "ACL \($0)" } ?? ""
-        case .setextattr, .deleteextattr:
-            return value("xattr").map { "xattr \($0)" } ?? ""
-        case .utimes:
-            return joined([
-                value("mtime").map { "mtime \($0)" },
-                value("atime").map { "atime \($0)" },
-            ])
-        default:
-            if !parameters.isEmpty {
-                return parameters.map(\.displayText).joined(separator: " · ")
-            }
-            return sourcePath.map { "Source: \($0)" } ?? ""
-        }
     }
 }
 

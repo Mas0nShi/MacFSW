@@ -1,26 +1,42 @@
 import Foundation
 import MacFSWCore
+import Observation
+import SwiftUI
 
 @MainActor
-final class ProcessSidebarStore: ObservableObject {
-    @Published var processSearchText = "" {
+@Observable
+final class ProcessSidebarStore {
+    var processSearchText = "" {
         didSet {
-            schedulePublish()
+            schedulePublish(reordering: .immediately)
         }
     }
 
-    @Published private(set) var processSummaries: [MacFSWProcessSummary] = []
-    @Published private(set) var filteredProcessSummaries: [MacFSWProcessSummary] = []
-    @Published private(set) var filteredProcessGroups: [MacFSWProcessGroupSummary] = []
-    @Published var expandedProcessGroupIDs: Set<String> = []
-    @Published var includeExitedProcesses: Bool {
+    private(set) var processSummaries: [MacFSWProcessSummary] = []
+    private(set) var filteredProcessSummaries: [MacFSWProcessSummary] = []
+    private(set) var filteredProcessGroups: [MacFSWProcessGroupSummary] = []
+    var expandedProcessGroupIDs: Set<String> = []
+    var includeExitedProcesses: Bool {
         didSet {
-            publish()
+            publish(reordering: .immediately)
         }
     }
 
+    @ObservationIgnored
     private var processSummaryIndex: [MacFSWProcessSummary.ID: MacFSWProcessSummary] = [:]
+    @ObservationIgnored
     private var publishTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var reorderTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var groupOrder = StableRanking<MacFSWProcessGroupSummary.ID>()
+
+    /// Reordering the user asked for (search, filters, a new session) shows
+    /// at once; reordering from counts changing while recording is throttled.
+    private enum Reordering {
+        case immediately
+        case throttled
+    }
 
     init(includeExitedProcesses: Bool = true) {
         self.includeExitedProcesses = includeExitedProcesses
@@ -31,9 +47,6 @@ final class ProcessSidebarStore: ObservableObject {
     }
 
     func update(with events: [MacFSWFileEvent]) {
-        guard !events.isEmpty else {
-            return
-        }
         ProcessSummaryReducer.update(index: &processSummaryIndex, with: events)
         schedulePublish()
     }
@@ -42,12 +55,12 @@ final class ProcessSidebarStore: ObservableObject {
         processSummaryIndex = Dictionary(summaries.map { ($0.id, $0) }, uniquingKeysWith: { lhs, rhs in
             lhs.lastEventNS >= rhs.lastEventNS ? lhs : rhs
         })
-        publish()
+        publish(reordering: .immediately)
     }
 
     func clear() {
-        publishTask?.cancel()
-        publishTask = nil
+        cancelPublishing()
+        groupOrder = StableRanking()
         processSummaryIndex.removeAll(keepingCapacity: true)
         processSummaries = []
         filteredProcessSummaries = []
@@ -58,6 +71,8 @@ final class ProcessSidebarStore: ObservableObject {
     func cancelPublishing() {
         publishTask?.cancel()
         publishTask = nil
+        reorderTask?.cancel()
+        reorderTask = nil
     }
 
     func summary(for id: MacFSWProcessSummary.ID) -> MacFSWProcessSummary? {
@@ -68,7 +83,11 @@ final class ProcessSidebarStore: ObservableObject {
         summary(for: id) != nil
     }
 
-    private func schedulePublish() {
+    private func schedulePublish(reordering: Reordering = .throttled) {
+        if reordering == .immediately {
+            publishTask?.cancel()
+            publishTask = nil
+        }
         guard publishTask == nil else {
             return
         }
@@ -77,16 +96,15 @@ final class ProcessSidebarStore: ObservableObject {
             guard !Task.isCancelled else {
                 return
             }
-            await MainActor.run {
-                self?.publishTask = nil
-                self?.publish()
-            }
+            self?.publish(reordering: reordering)
         }
     }
 
-    private func publish() {
+    private func publish(reordering: Reordering = .throttled) {
         publishTask?.cancel()
         publishTask = nil
+        reorderTask?.cancel()
+        reorderTask = nil
         let summaries = ProcessSummaryReducer.summaries(from: processSummaryIndex)
         processSummaries = summaries
         let filtered = ProcessSummaryReducer.filteredSummaries(
@@ -95,6 +113,37 @@ final class ProcessSidebarStore: ObservableObject {
             includeExited: includeExitedProcesses
         )
         filteredProcessSummaries = filtered
-        filteredProcessGroups = ProcessSummaryReducer.groups(from: filtered)
+
+        let ranked = ProcessSummaryReducer.groups(from: filtered)
+        if reordering == .immediately {
+            groupOrder = StableRanking()
+        }
+        let update = groupOrder.update(ranked.map { ($0.id, $0.eventCount) })
+        let byID = Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0) })
+        let groups = update.order.compactMap { byID[$0] }
+        if update.moved {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                filteredProcessGroups = groups
+            }
+        } else {
+            filteredProcessGroups = groups
+        }
+        if let retryAfter = update.retryAfter {
+            reorderTask = Task { [weak self] in
+                try? await Task.sleep(for: retryAfter)
+                guard !Task.isCancelled else {
+                    return
+                }
+                self?.publish()
+            }
+        }
+    }
+
+    func toggleProcessGroup(_ id: String) {
+        if expandedProcessGroupIDs.contains(id) {
+            expandedProcessGroupIDs.remove(id)
+        } else {
+            expandedProcessGroupIDs.insert(id)
+        }
     }
 }

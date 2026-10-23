@@ -14,7 +14,7 @@ final class QueryPrinterRoundTripTests: XCTestCase {
         XCTAssertEqual(print(anyContains("-x")), "any:-x")
         XCTAssertEqual(
             print(.and([pred(.eventType, .contains, ["rename"]), .not(pred(.platformBinary, .contains, ["true"]))])),
-            "op:rename (NOT platform:true)"
+            "op:rename NOT platform:true"
         )
         XCTAssertEqual(
             print(.or([.or([anyContains("a"), anyContains("b")]), anyContains("c")])),

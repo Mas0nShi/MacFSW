@@ -143,31 +143,3 @@ public struct MacFSWFacetValue: Equatable, Sendable {
         self.count = count
     }
 }
-
-public protocol MacFSWEventStore: Sendable {
-    func appendReturningEvents(_ incoming: [MacFSWFileEvent]) async throws -> MacFSWEventAppendResult
-    func clear() async throws
-    func count(matching query: MacFSWEventQuery) async throws -> Int
-    func rowSummaries(
-        matching query: MacFSWEventQuery,
-        visibleRange: Range<Int>,
-        sortOrder: MacFSWEventSortOrder
-    ) async throws -> [MacFSWEventRowSummary]
-    func event(id: UUID) async throws -> MacFSWFileEvent?
-    func event(
-        matching query: MacFSWEventQuery,
-        visibleRow: Int,
-        sortOrder: MacFSWEventSortOrder
-    ) async throws -> MacFSWFileEvent?
-    func visibleRowIndex(
-        of id: UUID,
-        matching query: MacFSWEventQuery,
-        sortOrder: MacFSWEventSortOrder
-    ) async throws -> Int?
-    func snapshot() async throws -> [MacFSWFileEvent]
-    func distinctValues(
-        for field: MacFSWQueryField,
-        matching query: MacFSWEventQuery,
-        limit: Int
-    ) async throws -> [MacFSWFacetValue]
-}

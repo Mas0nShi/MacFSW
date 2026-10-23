@@ -39,17 +39,12 @@ struct RecordingIndicatorView: View {
     let isRecording: Bool
 
     var body: some View {
-        TimelineView(.animation) { timeline in
-            let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
-            let opacity = isRecording ? 0.55 + 0.45 * sin(phase * .pi) : 1
-            let scale = isRecording ? 0.92 + 0.12 * sin(phase * .pi) : 1
-
-            Image(systemName: isRecording ? "record.circle.fill" : "circle")
-                .foregroundStyle(isRecording ? .red : .secondary)
-                .scaleEffect(scale)
-                .opacity(opacity)
-                .frame(width: 18, height: 18)
-        }
+        // A symbol effect pulses in the render server; a per-frame timeline
+        // here re-ran SwiftUI and redrew the status bar on every frame.
+        Image(systemName: isRecording ? "record.circle.fill" : "circle")
+            .foregroundStyle(isRecording ? .red : .secondary)
+            .symbolEffect(.pulse, options: .repeating, isActive: isRecording)
+            .frame(width: 18, height: 18)
     }
 }
 

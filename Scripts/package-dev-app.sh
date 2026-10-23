@@ -9,6 +9,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/.build/bundles}"
 APP_NAME="MacFSW"
 APP_EXECUTABLE="MacFSWApp"
 EXT_EXECUTABLE="MacFSWEndpointExtension"
+CLI_EXECUTABLE="macfsw"
 APP_ICON="$ROOT/Sources/MacFSWApp/Resources/MacFSW-AppIcon.icns"
 PROVISIONING_PROFILE_DIR="${PROVISIONING_PROFILE_DIR:-$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles}"
 
@@ -29,6 +30,8 @@ MARKETING_VERSION="${MARKETING_VERSION:-$(read_xcconfig_value MARKETING_VERSION)
 BUILD_VERSION="${CURRENT_PROJECT_VERSION:-$(read_xcconfig_value CURRENT_PROJECT_VERSION)}"
 HOST_BUNDLE_ID="${MACFSW_HOST_BUNDLE_ID:-$(read_xcconfig_value MACFSW_HOST_BUNDLE_ID)}"
 EXTENSION_BUNDLE_ID="${MACFSW_EXTENSION_BUNDLE_ID:-$(read_xcconfig_value MACFSW_EXTENSION_BUNDLE_ID)}"
+# Must match XPCClientPolicy.cliIdentifier: the extension admits the CLI by this identifier.
+CLI_IDENTIFIER="$HOST_BUNDLE_ID.cli"
 XPC_SERVICE_NAME="${MACFSW_XPC_SERVICE_NAME:-$(read_xcconfig_value MACFSW_XPC_SERVICE_NAME)}"
 CODE_SIGN="${CODE_SIGN:-1}"
 CODE_SIGN_IDENTITY_PATTERN="${CODE_SIGN_IDENTITY_PATTERN:-Apple Development}"
@@ -50,6 +53,7 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/private/tmp/macfsw-c
 
 swift build --disable-sandbox --configuration "$CONFIGURATION" --product "$APP_EXECUTABLE"
 swift build --disable-sandbox --configuration "$CONFIGURATION" --product "$EXT_EXECUTABLE"
+swift build --disable-sandbox --configuration "$CONFIGURATION" --product "$CLI_EXECUTABLE"
 BIN_DIR="$(swift build --disable-sandbox --configuration "$CONFIGURATION" --show-bin-path 2>/dev/null)"
 
 APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"
@@ -63,6 +67,7 @@ mkdir -p "$EXT_BUNDLE/Contents/MacOS"
 
 cp "$BIN_DIR/$APP_EXECUTABLE" "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
 cp "$BIN_DIR/$EXT_EXECUTABLE" "$EXT_BUNDLE/Contents/MacOS/$EXT_EXECUTABLE"
+cp "$BIN_DIR/$CLI_EXECUTABLE" "$APP_BUNDLE/Contents/MacOS/$CLI_EXECUTABLE"
 cp "$APP_ICON" "$APP_BUNDLE/Contents/Resources/MacFSW-AppIcon.icns"
 
 render_template() {
@@ -356,6 +361,12 @@ EOF
     --sign "$IDENTITY" \
     "$EXT_BUNDLE"
 
+  # Nested code is signed before the bundle that contains it.
+  codesign --force "${CODE_SIGN_TIMESTAMP_ARGS[@]}" --options runtime \
+    --identifier "$CLI_IDENTIFIER" \
+    --sign "$IDENTITY" \
+    "$APP_BUNDLE/Contents/MacOS/$CLI_EXECUTABLE"
+
   codesign --force "${CODE_SIGN_TIMESTAMP_ARGS[@]}" --options runtime --generate-entitlement-der \
     --entitlements "$CONFIG_DIR/MacFSWApp.entitlements" \
     --sign "$IDENTITY" \
@@ -372,7 +383,16 @@ EOF
   }
 
   verify_entitlement "$APP_BUNDLE" "com.apple.developer.system-extension.install"
+  verify_entitlement "$APP_BUNDLE" "keychain-access-groups"
   verify_entitlement "$EXT_BUNDLE" "com.apple.developer.endpoint-security.client"
+
+  # The same requirement XPCClientPolicy has the extension enforce.
+  CLI_REQUIREMENT="identifier \"$CLI_IDENTIFIER\" and anchor apple generic and certificate leaf[subject.OU] = \"$DEVELOPMENT_TEAM\""
+  if ! codesign --verify --strict -R="$CLI_REQUIREMENT" "$APP_BUNDLE/Contents/MacOS/$CLI_EXECUTABLE"; then
+    echo "The macfsw CLI does not satisfy: $CLI_REQUIREMENT" >&2
+    echo "The Endpoint Extension will refuse it." >&2
+    exit 3
+  fi
 
   if ! /usr/libexec/PlistBuddy -c "Print :NSSystemExtensionUsageDescription" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1; then
     echo "Host app Info.plist is missing NSSystemExtensionUsageDescription." >&2

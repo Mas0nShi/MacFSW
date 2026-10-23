@@ -47,26 +47,26 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
 
     private let config: MacFSWCaptureConfig
     private let onBatch: @Sendable (MacFSWEventBatch) -> Void
-    private let onFinish: @Sendable (String?) -> Void
     private let lock = NSLock()
     private var pending: [MacFSWFileEvent] = []
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "com.mas0n.MacFSW.EndpointCapture", qos: .userInitiated)
     private var stats = MacFSWCaptureStats()
+    private var lastGlobalSequence: UInt64?
+    /// Process identities by audit token, with the process-name filter
+    /// verdict. Processes emit events in runs, so this turns per-event
+    /// string building into a lookup. Only touched on the ES handler queue.
+    private var processCache: [AuditTokenKey: CachedProcess] = [:]
+    private static let processCacheLimit = 4_096
     private var state: MacFSWCaptureState = .idle
 
     #if canImport(EndpointSecurity)
     private var client: OpaquePointer?
     #endif
 
-    public init(
-        config: MacFSWCaptureConfig,
-        onBatch: @escaping @Sendable (MacFSWEventBatch) -> Void,
-        onFinish: @escaping @Sendable (String?) -> Void
-    ) {
+    public init(config: MacFSWCaptureConfig, onBatch: @escaping @Sendable (MacFSWEventBatch) -> Void) {
         self.config = config
         self.onBatch = onBatch
-        self.onFinish = onFinish
     }
 
     deinit {
@@ -180,9 +180,9 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
 
     #if canImport(EndpointSecurity)
     private func subscribe(client: OpaquePointer) throws {
-        var events = config.eventTypes.compactMap(esEventType)
+        var events = config.eventTypes.map(esEventType)
         if events.isEmpty {
-            events = MacFSWEventType.defaultCaptureTypes.compactMap(esEventType)
+            events = MacFSWEventType.defaultCaptureTypes.map(esEventType)
         }
         let result = events.withUnsafeBufferPointer { buffer in
             es_subscribe(client, buffer.baseAddress!, UInt32(buffer.count))
@@ -211,6 +211,7 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
     }
 
     private func handle(message: UnsafePointer<es_message_t>) {
+        countKernelDrops(message)
         guard let event = snapshot(message: message) else {
             return
         }
@@ -249,23 +250,32 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         onBatch(MacFSWEventBatch(events: batchEvents, stats: batchStats))
     }
 
+    /// The kernel numbers every message for this client; a gap means it had
+    /// to drop messages because this client could not keep up. Counted
+    /// before filtering, since filtered messages are numbered too.
+    private func countKernelDrops(_ message: UnsafePointer<es_message_t>) {
+        guard message.pointee.version >= 4 else {
+            return
+        }
+        let sequence = message.pointee.global_seq_num
+        lock.withLock {
+            if let last = lastGlobalSequence, sequence > last + 1 {
+                stats.droppedEvents += sequence - last - 1
+            }
+            lastGlobalSequence = sequence
+        }
+    }
+
     private func snapshot(message: UnsafePointer<es_message_t>) -> MacFSWFileEvent? {
-        let eventType = macfswEventType(message.pointee.event_type)
-        guard eventType != .unknown else {
+        guard let eventType = macfswEventType(message.pointee.event_type) else {
             return nil
         }
 
-        let process = processIdentity(message.pointee.process)
-        if config.excludedProcessNames.contains(where: { process.processName.localizedCaseInsensitiveContains($0) }) {
+        let cached = cachedProcess(message.pointee.process)
+        guard cached.isCaptured else {
             return nil
         }
-        if !config.targetPIDs.isEmpty, !config.targetPIDs.contains(process.pid) {
-            return nil
-        }
-        if !config.targetProcessNames.isEmpty,
-           !config.targetProcessNames.contains(where: { process.processName.localizedCaseInsensitiveContains($0) }) {
-            return nil
-        }
+        let process = cached.identity
 
         let paths = eventPaths(message: message)
         guard let targetPath = paths.target else {
@@ -443,17 +453,46 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
             .contains { $0.localizedCaseInsensitiveContains(text) }
     }
 
+    private func cachedProcess(_ processPointer: UnsafePointer<es_process_t>) -> CachedProcess {
+        let key = AuditTokenKey(processPointer.pointee.audit_token)
+        if let cached = processCache[key] {
+            return cached
+        }
+        let identity = processIdentity(processPointer)
+        let cached = CachedProcess(identity: identity, isCaptured: isCaptured(identity))
+        if processCache.count >= Self.processCacheLimit {
+            processCache.removeAll(keepingCapacity: true)
+        }
+        processCache[key] = cached
+        return cached
+    }
+
+    private func isCaptured(_ process: MacFSWProcessIdentity) -> Bool {
+        let name = process.processName
+        if config.excludedProcessNames.contains(where: { name.range(of: $0, options: .caseInsensitive) != nil }) {
+            return false
+        }
+        if !config.targetPIDs.isEmpty, !config.targetPIDs.contains(process.pid) {
+            return false
+        }
+        if !config.targetProcessNames.isEmpty,
+           !config.targetProcessNames.contains(where: { name.range(of: $0, options: .caseInsensitive) != nil }) {
+            return false
+        }
+        return true
+    }
+
     private func processIdentity(_ processPointer: UnsafePointer<es_process_t>) -> MacFSWProcessIdentity {
         let process = processPointer.pointee
         let executablePath = string(process.executable.pointee.path)
         return MacFSWProcessIdentity(
             pid: audit_token_to_pid(process.audit_token),
-            auditToken: auditTokenString(process.audit_token),
+            auditToken: hex(of: process.audit_token),
             executablePath: executablePath,
-            processName: URL(fileURLWithPath: executablePath).lastPathComponent,
+            processName: executablePath.split(separator: "/").last.map(String.init) ?? executablePath,
             signingID: string(process.signing_id),
             teamID: string(process.team_id),
-            cdhash: cdhashString(process.cdhash),
+            cdhash: hex(of: process.cdhash),
             isPlatformBinary: process.is_platform_binary
         )
     }
@@ -462,25 +501,26 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         guard let data = token.data, token.length > 0 else {
             return ""
         }
-        let buffer = UnsafeBufferPointer(start: data, count: token.length)
-        let bytes = buffer.map { UInt8(bitPattern: $0) }
-        return String(decoding: bytes, as: UTF8.self)
+        return data.withMemoryRebound(to: UInt8.self, capacity: token.length) {
+            String(decoding: UnsafeBufferPointer(start: $0, count: token.length), as: UTF8.self)
+        }
+    }
+
+    private func hex<T>(of value: T) -> String {
+        withUnsafeBytes(of: value) { bytes in
+            let digits = Array("0123456789abcdef".utf8)
+            return String(unsafeUninitializedCapacity: bytes.count * 2) { buffer in
+                for (index, byte) in bytes.enumerated() {
+                    buffer[index * 2] = digits[Int(byte >> 4)]
+                    buffer[index * 2 + 1] = digits[Int(byte & 0x0f)]
+                }
+                return bytes.count * 2
+            }
+        }
     }
 
     private func joinPath(directory: String, filename: String) -> String {
         URL(fileURLWithPath: directory).appendingPathComponent(filename).path
-    }
-
-    private func auditTokenString(_ token: audit_token_t) -> String {
-        withUnsafeBytes(of: token) { rawBuffer in
-            rawBuffer.map { String(format: "%02x", $0) }.joined()
-        }
-    }
-
-    private func cdhashString(_ cdhash: es_cdhash_t) -> String {
-        withUnsafeBytes(of: cdhash) { rawBuffer in
-            rawBuffer.map { String(format: "%02x", $0) }.joined()
-        }
     }
 
     private func parameter(_ key: String, _ label: String, _ value: String) -> MacFSWEventParameter {
@@ -508,7 +548,8 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         return "\(value.tv_sec).\(nanoseconds)"
     }
 
-    private func macfswEventType(_ eventType: es_event_type_t) -> MacFSWEventType {
+    /// nil for ES event types MacFSW does not record.
+    private func macfswEventType(_ eventType: es_event_type_t) -> MacFSWEventType? {
         switch eventType {
         case ES_EVENT_TYPE_NOTIFY_CREATE: .create
         case ES_EVENT_TYPE_NOTIFY_OPEN: .open
@@ -528,7 +569,7 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         case ES_EVENT_TYPE_NOTIFY_SETEXTATTR: .setextattr
         case ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR: .deleteextattr
         case ES_EVENT_TYPE_NOTIFY_UTIMES: .utimes
-        default: .unknown
+        default: nil
         }
     }
 
@@ -556,7 +597,7 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         }
     }
 
-    private func esEventType(_ eventType: MacFSWEventType) -> es_event_type_t? {
+    private func esEventType(_ eventType: MacFSWEventType) -> es_event_type_t {
         switch eventType {
         case .create: ES_EVENT_TYPE_NOTIFY_CREATE
         case .open: ES_EVENT_TYPE_NOTIFY_OPEN
@@ -576,7 +617,6 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         case .setextattr: ES_EVENT_TYPE_NOTIFY_SETEXTATTR
         case .deleteextattr: ES_EVENT_TYPE_NOTIFY_DELETEEXTATTR
         case .utimes: ES_EVENT_TYPE_NOTIFY_UTIMES
-        case .unknown: nil
         }
     }
 
@@ -600,4 +640,19 @@ public final class EndpointSecurityCapture: @unchecked Sendable {
         }
     }
     #endif
+}
+
+private struct AuditTokenKey: Hashable {
+    let words: SIMD8<UInt32>
+
+    init(_ token: audit_token_t) {
+        let v = token.val
+        words = SIMD8(v.0, v.1, v.2, v.3, v.4, v.5, v.6, v.7)
+    }
+}
+
+private struct CachedProcess {
+    let identity: MacFSWProcessIdentity
+    /// Passes the process-name and PID filters of the capture config.
+    let isCaptured: Bool
 }

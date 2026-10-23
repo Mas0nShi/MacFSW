@@ -91,7 +91,7 @@ final class MacFSWAppTests: XCTestCase {
         XCTAssertTrue(ErrorPresentation.isFullDiskAccessError("ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED rawValue: 4"))
         XCTAssertTrue(ErrorPresentation.isFullDiskAccessError("Needs Full Disk Access"))
         XCTAssertTrue(ErrorPresentation.isCancellationError(CancellationError()))
-        XCTAssertFalse(ErrorPresentation.userFacingMessage(TestPlainError()).isEmpty)
+        XCTAssertFalse(TestPlainError().userFacingMessage.isEmpty)
     }
 
     @MainActor
@@ -162,6 +162,57 @@ final class MacFSWAppTests: XCTestCase {
     }
 
     @MainActor
+    func testAnalysisTemplateStorePersistsAndReloads() throws {
+        let suiteName = "MacFSWAppTests.Templates.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let settings = MacFSWSettingsStore(defaults: defaults)
+
+        let first = AnalysisTemplateStore(settingsStore: settings)
+        XCTAssertEqual(first.selectedTemplateID, MacFSWAnalysisPromptTemplateCatalog.defaultTemplate.id)
+        let custom = first.duplicate(MacFSWAnalysisPromptTemplateCatalog.securityTriage)
+        first.selectedTemplateID = custom.id
+
+        let reloaded = AnalysisTemplateStore(settingsStore: settings)
+        XCTAssertEqual(reloaded.customTemplates.map(\.id), [custom.id])
+        XCTAssertEqual(reloaded.selectedTemplateID, custom.id)
+        XCTAssertEqual(reloaded.selectedTemplate.id, custom.id)
+    }
+
+    @MainActor
+    func testAnalysisTemplateStoreFallsBackWhenSelectedTemplateDeleted() {
+        let suiteName = "MacFSWAppTests.Templates.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let store = AnalysisTemplateStore(settingsStore: MacFSWSettingsStore(defaults: defaults))
+        let custom = store.duplicate(MacFSWAnalysisPromptTemplateCatalog.behaviorSummary)
+        store.selectedTemplateID = custom.id
+
+        store.delete(id: custom.id)
+        XCTAssertEqual(store.selectedTemplateID, MacFSWAnalysisPromptTemplateCatalog.defaultTemplate.id)
+        XCTAssertTrue(store.customTemplates.isEmpty)
+    }
+
+    @MainActor
+    func testAnalysisTemplateStoreRefusesBuiltInMutation() {
+        let store = AnalysisTemplateStore(
+            settingsStore: MacFSWSettingsStore(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        )
+        var builtIn = MacFSWAnalysisPromptTemplateCatalog.securityTriage
+        builtIn.name = "Hijacked"
+        store.update(builtIn)
+        store.delete(id: builtIn.id)
+        XCTAssertEqual(
+            store.builtInTemplates.first { $0.id == builtIn.id }?.name,
+            MacFSWAnalysisPromptTemplateCatalog.securityTriage.name
+        )
+    }
+
+    @MainActor
     func testAnalysisStoreResetForNewSessionClearsTransientAndHistoryState() {
         let store = AnalysisStore(llmClient: MacFSWLLMClient())
         store.results = [
@@ -172,10 +223,12 @@ final class MacFSWAppTests: XCTestCase {
                 durationSeconds: 1,
                 scope: "scope",
                 providerSummary: "provider",
-                eventCount: 10,
-                payloadEventCount: 5,
+                totalEventCount: 10,
+                fetchedEventCount: 5,
+                sampledEventCount: 5,
                 pathCount: 2,
                 operationCount: 3,
+                templateName: "Security Triage",
                 markdown: "# Report"
             )
         ]
@@ -203,6 +256,32 @@ final class MacFSWAppTests: XCTestCase {
         XCTAssertEqual(installer.checkInstalledVersionCallCount, 1)
     }
 
+    @MainActor
+    func testExtensionUpdateStaysVisibleAfterReadyAndIsDroppedOnFailure() {
+        let installer = TestSystemExtensionInstaller()
+        let store = SystemExtensionStatusStore(installer: installer)
+
+        installer.onUpdateStarted?("0.1.8 (13)", "0.1.8 (14)")
+        installer.onStateChange?(.activating, "Updating")
+        store.applyHealth(MacFSWCaptureHealth(endpointSecurityAuthorized: true, extensionVersion: MacFSWComponentVersion(shortVersion: "0.1.8", build: "13")))
+        XCTAssertEqual(store.installState, .activating, "the old extension answering must not end the activation")
+        installer.onStateChange?(.starting, "Activated")
+        XCTAssertEqual(store.installState, .starting)
+        store.applyHealth(MacFSWCaptureHealth(endpointSecurityAuthorized: true, extensionVersion: MacFSWComponentVersion(shortVersion: "0.1.8", build: "14")))
+
+        XCTAssertEqual(store.installState, .ready)
+        XCTAssertEqual(store.completedUpdate?.from, "0.1.8 (13)")
+        XCTAssertEqual(store.completedUpdate?.to, "0.1.8 (14)")
+        XCTAssertEqual(store.runningVersion?.build, "14")
+
+        let failingInstaller = TestSystemExtensionInstaller()
+        let failed = SystemExtensionStatusStore(installer: failingInstaller)
+        failingInstaller.onUpdateStarted?("0.1.8 (13)", "0.1.8 (14)")
+        failingInstaller.onStateChange?(.failed, "Denied")
+        failingInstaller.onStateChange?(.starting, "Activated")
+        XCTAssertNil(failed.completedUpdate)
+    }
+
     private func makeProcessSummary(id: String, lifecycle: MacFSWProcessLifecycle) -> MacFSWProcessSummary {
         MacFSWProcessSummary(
             id: id,
@@ -226,6 +305,7 @@ private struct TestPlainError: Error {}
 @MainActor
 private final class TestSystemExtensionInstaller: SystemExtensionInstalling {
     var onStateChange: ((MacFSWSystemExtensionInstallState, String) -> Void)?
+    var onUpdateStarted: ((String, String) -> Void)?
     private(set) var checkInstalledVersionCallCount = 0
 
     func activate() {}
@@ -233,8 +313,6 @@ private final class TestSystemExtensionInstaller: SystemExtensionInstalling {
     func checkInstalledVersion() {
         checkInstalledVersionCallCount += 1
     }
-
-    func resetSubmission() {}
 
     func openLoginItemsSettings() {}
 

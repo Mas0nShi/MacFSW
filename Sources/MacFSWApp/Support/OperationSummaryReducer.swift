@@ -14,9 +14,6 @@ enum OperationSummaryReducer {
         rows: [MacFSWEventRowSummary],
         to operationSummaries: [MacFSWOperationSummary]
     ) -> [MacFSWOperationSummary] {
-        guard !rows.isEmpty else {
-            return operationSummaries
-        }
         var counts = Dictionary(uniqueKeysWithValues: operationSummaries.map { ($0.bucket, $0.eventCount) })
         for row in rows {
             let bucket = MacFSWOperationBucket.bucket(for: row.eventType)

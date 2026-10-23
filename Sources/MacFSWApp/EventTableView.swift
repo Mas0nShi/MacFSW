@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import MacFSWCore
 import SwiftUI
 
@@ -17,7 +18,9 @@ struct EventTableView: NSViewRepresentable {
     var onUserWillSelect: (Int) -> Void
     var onUserSelected: (Int?, UUID?) -> Void
     var onClearSelection: () -> Void
-    var onLiveEdgeChanged: (Bool) -> Void
+    /// The user scrolled away from (false) or back to (true) the newest row.
+    var onFollowChanged: (Bool) -> Void
+    var onRowAction: (EventRowAction, MacFSWEventRowSummary) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -33,17 +36,18 @@ struct EventTableView: NSViewRepresentable {
             onUserWillSelect: onUserWillSelect,
             onUserSelected: onUserSelected,
             onClearSelection: onClearSelection,
-            onLiveEdgeChanged: onLiveEdgeChanged
+            onFollowChanged: onFollowChanged
         )
     }
 
     func makeNSView(context: Context) -> NSScrollView {
         let tableView = SelectableEventTableView()
+        tableView.style = .fullWidth
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = false
         tableView.allowsEmptySelection = true
         tableView.selectionHighlightStyle = .regular
-        tableView.rowHeight = 30
+        tableView.rowHeight = 26
         tableView.headerView = NSTableHeaderView()
         tableView.dataSource = context.coordinator
         tableView.delegate = context.coordinator
@@ -59,14 +63,23 @@ struct EventTableView: NSViewRepresentable {
         tableView.onClearSelection = { [weak coordinator = context.coordinator] in
             coordinator?.scheduleClearSelection()
         }
-        tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        tableView.menu = context.coordinator.makeContextMenu()
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 
-        addColumn("time", "Time", 148, to: tableView)
-        addColumn("process", "Process", 170, to: tableView)
-        addColumn("pid", "PID", 70, to: tableView)
-        addColumn("target", "Target", 420, to: tableView)
-        addColumn("details", "Details", 280, to: tableView)
-        addColumn("signing", "Signing", 180, to: tableView)
+        for column in EventTableColumn.allCases {
+            let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
+            tableColumn.title = column.title
+            tableColumn.width = column.width
+            tableColumn.minWidth = min(column.width, 80)
+            tableColumn.resizingMask = column.isFlexible ? [.autoresizingMask, .userResizingMask] : .userResizingMask
+            tableColumn.isHidden = column.isHiddenByDefault
+            tableView.addTableColumn(tableColumn)
+        }
+        // Remembers widths, order, and hidden columns; set after the
+        // columns exist so the saved layout is applied to them.
+        tableView.autosaveName = "MacFSW.EventTable"
+        tableView.autosaveTableColumns = true
+        tableView.headerView?.menu = context.coordinator.makeColumnMenu()
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -75,6 +88,11 @@ struct EventTableView: NSViewRepresentable {
         scrollView.contentView.postsBoundsChangedNotifications = true
         context.coordinator.tableView = tableView
         context.coordinator.observe(scrollView: scrollView)
+        // Column autoresizing only reacts to resizes; fit the flexible
+        // columns to the first real width so none start off-screen.
+        DispatchQueue.main.async { [weak tableView] in
+            tableView?.sizeToFit()
+        }
         return scrollView
     }
 
@@ -91,7 +109,8 @@ struct EventTableView: NSViewRepresentable {
         context.coordinator.onUserWillSelect = onUserWillSelect
         context.coordinator.onUserSelected = onUserSelected
         context.coordinator.onClearSelection = onClearSelection
-        context.coordinator.onLiveEdgeChanged = onLiveEdgeChanged
+        context.coordinator.onFollowChanged = onFollowChanged
+        context.coordinator.onRowAction = onRowAction
         guard let tableView = context.coordinator.tableView else {
             return
         }
@@ -101,66 +120,55 @@ struct EventTableView: NSViewRepresentable {
             context.coordinator.isApplyingSwiftUISelection = false
         }
 
-        let didCacheReset = context.coordinator.lastCacheResetSerial != cacheResetSerial
-        let wasAtLiveEdge = context.coordinator.isAtLiveEdge()
+        let coordinator = context.coordinator
+        let didCacheReset = coordinator.lastCacheResetSerial != cacheResetSerial
         if didCacheReset {
-            context.coordinator.clearRowSnapshots()
-            context.coordinator.lastCacheResetSerial = cacheResetSerial
+            coordinator.clearRowSnapshots()
+            coordinator.lastCacheResetSerial = cacheResetSerial
         }
 
-        let hasPendingLiveScrollRequest = context.coordinator.lastScrollToLiveSerial != scrollToLiveSerial
-        var shouldScrollToLive = hasPendingLiveScrollRequest && followMode == .live
-        if context.coordinator.lastResetSerial != resetSerial {
+        let didReset = coordinator.lastResetSerial != resetSerial
+        if didReset {
             tableView.reloadData()
-            context.coordinator.lastRowCount = rowCount
-            context.coordinator.lastResetSerial = resetSerial
-            shouldScrollToLive = shouldScrollToLive || (followMode == .live && wasAtLiveEdge)
-        } else if context.coordinator.lastRowCount != rowCount {
-            let oldCount = context.coordinator.lastRowCount
-            context.coordinator.applyRowCountChange(from: context.coordinator.lastRowCount, to: rowCount)
-            context.coordinator.lastRowCount = rowCount
+            coordinator.lastRowCount = rowCount
+            coordinator.lastResetSerial = resetSerial
+        } else if coordinator.lastRowCount != rowCount {
+            coordinator.applyRowCountChange(from: coordinator.lastRowCount, to: rowCount)
+            coordinator.lastRowCount = rowCount
             if didCacheReset {
-                context.coordinator.reloadVisibleRows(allowUncachedRows: true)
+                coordinator.reloadVisibleRows(allowUncachedRows: true)
             }
-            shouldScrollToLive = shouldScrollToLive || (followMode == .live && rowCount > oldCount && wasAtLiveEdge)
         } else if didCacheReset {
-            context.coordinator.reloadVisibleRows(allowUncachedRows: true)
-        } else if context.coordinator.lastCacheVersion != cacheVersion {
-            context.coordinator.reloadVisibleRows()
+            coordinator.reloadVisibleRows(allowUncachedRows: true)
+        } else if coordinator.lastCacheVersion != cacheVersion {
+            coordinator.reloadVisibleRows()
         }
-        context.coordinator.lastCacheVersion = cacheVersion
+        coordinator.lastCacheVersion = cacheVersion
 
-        context.coordinator.requestVisibleRows()
+        coordinator.requestVisibleRows()
 
-        if rowCount == 0 || context.coordinator.lastSelectionResetSerial != selectionResetSerial {
+        if rowCount == 0 || coordinator.lastSelectionResetSerial != selectionResetSerial {
             tableView.deselectAll(nil)
-            context.coordinator.clearUserSelectionLock()
+            coordinator.clearUserSelectionLock()
         } else {
-            context.coordinator.selectVisibleEventIfNeeded()
+            coordinator.selectVisibleEventIfNeeded()
         }
+        coordinator.lastSelectionResetSerial = selectionResetSerial
 
-        if shouldScrollToLive {
-            context.coordinator.lastScrollToLiveSerial = scrollToLiveSerial
-            context.coordinator.scrollToLive()
-        } else if hasPendingLiveScrollRequest, followMode != .live {
-            context.coordinator.lastScrollToLiveSerial = scrollToLiveSerial
+        coordinator.syncFollowing(with: followMode)
+        if coordinator.lastScrollToLiveSerial != scrollToLiveSerial {
+            coordinator.lastScrollToLiveSerial = scrollToLiveSerial
+            coordinator.jumpToLiveEdge(gliding: !didReset)
+        } else if didReset, followMode == .live {
+            coordinator.jumpToLiveEdge(gliding: false)
         } else {
-            context.coordinator.reportLiveEdgeIfNeeded()
+            // New rows may have arrived; the display link glides to them.
+            coordinator.startFollowing()
         }
-
-        context.coordinator.lastSelectionResetSerial = selectionResetSerial
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
         coordinator.stopObserving()
-    }
-
-    private func addColumn(_ identifier: String, _ title: String, _ width: CGFloat, to tableView: NSTableView) {
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
-        column.title = title
-        column.width = width
-        column.minWidth = max(48, min(width, 100))
-        tableView.addTableColumn(column)
     }
 
     @MainActor
@@ -221,25 +229,28 @@ struct EventTableView: NSViewRepresentable {
         var onUserWillSelect: (Int) -> Void
         var onUserSelected: (Int?, UUID?) -> Void
         var onClearSelection: () -> Void
-        var onLiveEdgeChanged: (Bool) -> Void
+        var onFollowChanged: (Bool) -> Void
+        var onRowAction: (EventRowAction, MacFSWEventRowSummary) -> Void = { _, _ in }
         weak var tableView: NSTableView?
         var isApplyingSwiftUISelection = false
         var isProgrammaticScroll = false
+        var isFollowing = true
+        var hasUnreportedFollowChange = false
+        var followLink: CADisplayLink?
+        var lastFollowFrame: CFTimeInterval?
+        var lastFollowJump: CFTimeInterval = 0
+        var lastClipBounds: NSRect?
         var lastScrollToLiveSerial = 0
         var lastSelectionResetSerial = 0
         var lastRowCount = 0
         var lastCacheVersion = 0
         var lastCacheResetSerial = 0
         var lastResetSerial = 0
-        var lastObservedVisibleBottom: CGFloat?
-        var lastReportedLiveEdge: Bool?
         weak var observedClipView: NSClipView?
         var rowSnapshots: [Int: MacFSWEventRowSummary] = [:]
         var lockedUserSelectionRow: Int?
         var lockedUserSelectionID: UUID?
         var lockedUserSelectionDeadline: Date?
-        var pendingLiveEdgeReport: Bool?
-        var isLiveEdgeReportScheduled = false
 
         init(
             selectedEventID: Binding<UUID?>,
@@ -254,7 +265,7 @@ struct EventTableView: NSViewRepresentable {
             onUserWillSelect: @escaping (Int) -> Void,
             onUserSelected: @escaping (Int?, UUID?) -> Void,
             onClearSelection: @escaping () -> Void,
-            onLiveEdgeChanged: @escaping (Bool) -> Void
+            onFollowChanged: @escaping (Bool) -> Void
         ) {
             self.selectedEventID = selectedEventID
             self.selectedRow = selectedRow
@@ -268,7 +279,7 @@ struct EventTableView: NSViewRepresentable {
             self.onUserWillSelect = onUserWillSelect
             self.onUserSelected = onUserSelected
             self.onClearSelection = onClearSelection
-            self.onLiveEdgeChanged = onLiveEdgeChanged
+            self.onFollowChanged = onFollowChanged
             self.lastRowCount = rowCount
             self.lastCacheVersion = cacheVersion
             self.lastCacheResetSerial = cacheResetSerial

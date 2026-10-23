@@ -1,27 +1,68 @@
 import Foundation
+import Observation
 import MacFSWCore
 
 @MainActor
-final class SystemExtensionStatusStore: ObservableObject {
-    @Published var installState: MacFSWSystemExtensionInstallState = .unknown
-    @Published var installMessage = "Checking System Extension readiness."
+@Observable
+final class SystemExtensionStatusStore {
+    var installState: MacFSWSystemExtensionInstallState = .unknown
+    var installMessage = "Checking System Extension readiness."
+    /// What the running extension reported; nil until a health check
+    /// succeeds, and for extensions too old to report it.
+    private(set) var runningVersion: MacFSWComponentVersion?
+    /// The extension packaged in this app — what activation installs.
+    let bundledVersion = Bundle.main.bundledEndpointExtensionVersion
+    /// Set when this launch replaced an older extension, so the update
+    /// stays visible after the status settles on Ready.
+    private(set) var completedUpdate: (from: String, to: String)?
+    @ObservationIgnored
+    private var pendingUpdate: (from: String, to: String)?
 
+    func acknowledgeUpdate() {
+        completedUpdate = nil
+    }
+
+    /// The running extension is not the one this app bundles: health
+    /// checks may pass while newer capabilities are missing.
+    var isRunningOutdatedExtension: Bool {
+        guard installState == .ready, let bundledVersion else {
+            return false
+        }
+        return runningVersion != bundledVersion
+    }
+
+    @ObservationIgnored
     var onErrorMessage: ((String) -> Void)?
-    var onReady: (() -> Void)?
+    @ObservationIgnored
+    /// macOS activated the extension; its process may still be starting.
+    var onActivated: (() -> Void)?
 
     private let installer: any SystemExtensionInstalling
 
     init(installer: any SystemExtensionInstalling) {
         self.installer = installer
         self.installer.onStateChange = { [weak self] state, message in
-            self?.installState = state
-            self?.installMessage = message
-            if state == .failed {
-                self?.onErrorMessage?(message)
+            guard let self else {
+                return
             }
-            if state == .ready {
-                self?.onReady?()
+            installState = state
+            installMessage = message
+            switch state {
+            case .failed:
+                pendingUpdate = nil
+                onErrorMessage?(message)
+            case .starting:
+                if let pendingUpdate {
+                    completedUpdate = pendingUpdate
+                    self.pendingUpdate = nil
+                }
+                onActivated?()
+            default:
+                break
             }
+        }
+        self.installer.onUpdateStarted = { [weak self] installed, bundled in
+            self?.pendingUpdate = (installed, bundled)
         }
     }
 
@@ -37,10 +78,6 @@ final class SystemExtensionStatusStore: ObservableObject {
         installer.openFullDiskAccessSettings()
     }
 
-    func checkAgain() {
-        installer.resetSubmission()
-    }
-
     func applyHealth(_ health: MacFSWCaptureHealth) {
         if health.fullDiskAccessHint {
             installState = .failed
@@ -48,6 +85,12 @@ final class SystemExtensionStatusStore: ObservableObject {
             return
         }
 
+        runningVersion = health.extensionVersion
+        // While macOS is still activating or waiting for approval, the old
+        // extension may answer; that must not end the activation display.
+        guard installState != .activating, installState != .needsApproval else {
+            return
+        }
         installState = .ready
         installMessage = health.endpointSecurityAuthorized
             ? "MacFSW Endpoint Extension is reachable and has Endpoint Security permission."
@@ -64,7 +107,6 @@ final class SystemExtensionStatusStore: ObservableObject {
     }
 
     func applyXPCFailure(message: String) {
-        installer.resetSubmission()
         installState = .notReady
         installMessage = "The installed Endpoint Extension is not accepting capture streams. It may be out of date; enable the System Extension again to install the bundled version."
     }

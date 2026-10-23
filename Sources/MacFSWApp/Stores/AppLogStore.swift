@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Observation
 
 enum MacFSWAppLogLevel: String, CaseIterable, Identifiable {
     case error
@@ -58,20 +59,21 @@ actor MacFSWLogWriter {
 }
 
 @MainActor
-final class AppLogStore: ObservableObject {
-    @Published var isEnabled: Bool {
+@Observable
+final class AppLogStore {
+    var isEnabled: Bool {
         didSet {
             defaults.set(isEnabled, forKey: Self.isEnabledKey)
         }
     }
 
-    @Published var minimumLevel: MacFSWAppLogLevel {
+    var minimumLevel: MacFSWAppLogLevel {
         didSet {
             defaults.set(minimumLevel.rawValue, forKey: Self.minimumLevelKey)
         }
     }
 
-    @Published private(set) var lastWriteError: String?
+    private(set) var lastWriteError: String?
 
     let logDirectoryURL: URL
     let logFileURL: URL
@@ -115,9 +117,7 @@ final class AppLogStore: ObservableObject {
             do {
                 try await writer.append(entry, to: fileURL)
             } catch {
-                await MainActor.run {
-                    self.lastWriteError = ErrorPresentation.userFacingMessage(error)
-                }
+                self.lastWriteError = error.userFacingMessage
             }
         }
     }
@@ -130,7 +130,7 @@ final class AppLogStore: ObservableObject {
             }
             NSWorkspace.shared.activateFileViewerSelecting([logFileURL])
         } catch {
-            lastWriteError = ErrorPresentation.userFacingMessage(error)
+            lastWriteError = error.userFacingMessage
         }
     }
 
@@ -144,13 +144,9 @@ final class AppLogStore: ObservableObject {
         Task { [writer] in
             do {
                 try await writer.clear(fileURL)
-                await MainActor.run {
-                    self.lastWriteError = nil
-                }
+                self.lastWriteError = nil
             } catch {
-                await MainActor.run {
-                    self.lastWriteError = ErrorPresentation.userFacingMessage(error)
-                }
+                self.lastWriteError = error.userFacingMessage
             }
         }
     }

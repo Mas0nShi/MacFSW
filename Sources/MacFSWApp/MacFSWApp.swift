@@ -4,12 +4,13 @@ import SwiftUI
 @main
 struct MacFSWApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var coordinator = MacFSWAppCoordinator()
+    @State private var coordinator = MacFSWAppCoordinator()
+    @AppStorage("MacFSW.ShowsInspector") private var showsInspector = true
 
     var body: some Scene {
         WindowGroup {
             DashboardView()
-                .environmentObject(coordinator)
+                .environment(coordinator)
                 .frame(minWidth: 1180, minHeight: 720)
                 .onAppear {
                     appDelegate.coordinator = coordinator
@@ -18,7 +19,14 @@ struct MacFSWApp: App {
                     await coordinator.refreshHealth()
                 }
         }
+        .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
+            CommandGroup(after: .sidebar) {
+                Button(showsInspector ? "Hide Inspector" : "Show Inspector") {
+                    showsInspector.toggle()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Session") {
                     coordinator.newSession()
@@ -50,7 +58,7 @@ struct MacFSWApp: App {
 
         Settings {
             SettingsView()
-                .environmentObject(coordinator)
+                .environment(coordinator)
                 .frame(width: 760, height: 540)
         }
     }

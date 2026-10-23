@@ -22,7 +22,6 @@ func symbol(for type: MacFSWEventType) -> String {
     case .exchangedata: "arrow.left.arrow.right"
     case .chmod, .chown, .setflags, .setacl: "slider.horizontal.3"
     case .setextattr, .deleteextattr, .utimes: "info.circle"
-    case .unknown: "questionmark.circle"
     }
 }
 

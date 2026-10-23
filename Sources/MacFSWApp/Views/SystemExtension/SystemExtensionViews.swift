@@ -2,14 +2,17 @@ import MacFSWCore
 import SwiftUI
 
 struct SystemExtensionSettingsPane: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         Form {
             Section("Status") {
-                LabeledContent("State", value: model.extensionInstallState.title)
-                Text(model.extensionInstallMessage)
+                LabeledContent("State", value: model.extensionStatus.installState.title)
+                LabeledContent("Running", value: model.extensionStatus.runningVersion?.description ?? "Unknown")
+                LabeledContent("In This App", value: model.extensionStatus.bundledVersion?.description ?? "Not packaged")
+                Text(model.extensionStatus.installMessage)
                     .foregroundStyle(.secondary)
+                ExtensionVersionNote()
             }
 
             Section("Actions") {
@@ -27,13 +30,13 @@ struct SystemExtensionSettingsPane: View {
                     }
 
                     Button {
-                        model.openSystemExtensionSettings()
+                        model.extensionStatus.openLoginItemsSettings()
                     } label: {
                         Label("Login Items & Extensions", systemImage: "gear")
                     }
 
                     Button {
-                        model.openFullDiskAccessSettings()
+                        model.extensionStatus.openFullDiskAccessSettings()
                     } label: {
                         Label("Open Full Disk Access", systemImage: "lock.shield")
                     }
@@ -59,31 +62,33 @@ extension MacFSWCaptureProfile {
 }
 
 struct SystemExtensionStatusView: View {
-    @EnvironmentObject private var model: MacFSWAppCoordinator
+    @Environment(MacFSWAppCoordinator.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: model.extensionInstallState.symbolName)
+                Image(systemName: model.extensionStatus.installState.symbolName)
                     .foregroundStyle(statusColor)
                     .frame(width: 16)
-                Text(model.extensionInstallState.title)
+                Text(model.extensionStatus.installState.title)
                     .font(.callout.weight(.medium))
                 Spacer()
-                if model.extensionInstallState == .activating || model.extensionInstallState == .unknown {
+                if [.activating, .starting, .unknown].contains(model.extensionStatus.installState) {
                     ProgressView()
                         .controlSize(.small)
                 }
             }
 
-            Text(model.extensionInstallMessage)
+            Text(model.extensionStatus.installMessage)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(5)
 
-            switch model.extensionInstallState {
+            ExtensionVersionNote()
+
+            switch model.extensionStatus.installState {
             case .ready:
-                if model.captureHealth.fullDiskAccessHint {
+                if model.session.captureHealth.fullDiskAccessHint {
                     fullDiskAccessActions
                 } else {
                     EmptyView()
@@ -91,7 +96,7 @@ struct SystemExtensionStatusView: View {
             case .needsApproval:
                 VStack(alignment: .leading, spacing: 6) {
                     Button {
-                        model.openSystemExtensionSettings()
+                        model.extensionStatus.openLoginItemsSettings()
                     } label: {
                         Label("Login Items & Extensions", systemImage: "gear")
                     }
@@ -104,7 +109,7 @@ struct SystemExtensionStatusView: View {
                 }
                 .buttonStyle(.borderless)
             case .notReady, .failed, .unknown:
-                if model.captureHealth.fullDiskAccessHint {
+                if model.session.captureHealth.fullDiskAccessHint {
                     fullDiskAccessActions
                 } else {
                     Button {
@@ -114,9 +119,11 @@ struct SystemExtensionStatusView: View {
                     }
                     .buttonStyle(.borderless)
                 }
+            case .starting:
+                EmptyView()
             case .activating:
                 Button {
-                    model.openSystemExtensionSettings()
+                    model.extensionStatus.openLoginItemsSettings()
                 } label: {
                     Label("Login Items & Extensions", systemImage: "gear")
                 }
@@ -127,14 +134,14 @@ struct SystemExtensionStatusView: View {
     }
 
     private var statusColor: Color {
-        switch model.extensionInstallState {
+        switch model.extensionStatus.installState {
         case .ready:
             .green
         case .failed:
             .red
         case .needsApproval:
             .orange
-        case .activating:
+        case .activating, .starting:
             .blue
         case .unknown, .notReady:
             .secondary
@@ -144,7 +151,7 @@ struct SystemExtensionStatusView: View {
     private var fullDiskAccessActions: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                model.openFullDiskAccessSettings()
+                model.extensionStatus.openFullDiskAccessSettings()
             } label: {
                 Label("Open Full Disk Access", systemImage: "lock.shield")
             }
@@ -156,5 +163,46 @@ struct SystemExtensionStatusView: View {
             }
         }
         .buttonStyle(.borderless)
+    }
+}
+
+/// The extension's version story in one line: just updated, outdated
+/// (with a fix), or simply which version is running.
+private struct ExtensionVersionNote: View {
+    @Environment(MacFSWAppCoordinator.self) private var model
+
+    var body: some View {
+        let status = model.extensionStatus
+        if status.isRunningOutdatedExtension {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(
+                    "Running \(status.runningVersion?.description ?? "an older extension"); this app includes \(status.bundledVersion?.description ?? "a newer one").",
+                    systemImage: "exclamationmark.arrow.circlepath"
+                )
+                .foregroundStyle(.orange)
+                Button {
+                    model.activateSystemExtension()
+                } label: {
+                    Label("Update Extension", systemImage: "arrow.down.circle")
+                }
+                .buttonStyle(.borderless)
+            }
+            .font(.caption)
+        } else if let update = status.completedUpdate {
+            HStack {
+                Label("Updated from \(update.from) to \(update.to).", systemImage: "checkmark.circle")
+                    .foregroundStyle(.green)
+                Spacer()
+                Button("OK") {
+                    status.acknowledgeUpdate()
+                }
+                .buttonStyle(.borderless)
+            }
+            .font(.caption)
+        } else if let running = status.runningVersion {
+            Text("Version \(running.description)")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
     }
 }

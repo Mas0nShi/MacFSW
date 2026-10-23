@@ -8,127 +8,44 @@ extension EventTableView.Coordinator {
         }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-            guard row >= 0, row < rowCount, let tableColumn else {
+            guard row >= 0, row < rowCount,
+                  let tableColumn,
+                  let column = EventTableColumn(rawValue: tableColumn.identifier.rawValue) else {
                 return nil
             }
-            let identifier = tableColumn.identifier
             let loadedSummary = rowProvider(row)
             if let loadedSummary {
                 rowSnapshots[row] = loadedSummary
             }
-            let summary = loadedSummary ?? rowSnapshots[row]
-
-            if identifier.rawValue == "time" {
-                return eventTimeCell(in: tableView, identifier: identifier, summary: summary)
-            }
-
-            let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView ?? NSTableCellView()
-            cell.identifier = identifier
-
-            let textField: NSTextField
-            if let existing = cell.textField {
-                textField = existing
-            } else {
-                textField = NSTextField(labelWithString: "")
-                textField.translatesAutoresizingMaskIntoConstraints = false
-                textField.lineBreakMode = .byTruncatingMiddle
-                textField.maximumNumberOfLines = 1
-                cell.addSubview(textField)
-                cell.textField = textField
-                NSLayoutConstraint.activate([
-                    textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
-                    textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-                    textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                ])
-            }
-            textField.stringValue = value(for: identifier.rawValue, summary: summary)
-            textField.font = font(for: identifier.rawValue)
-            textField.textColor = textColor(for: identifier.rawValue, summary: summary)
-            cell.toolTip = nil
+            let cell = tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? EventTableCellView
+                ?? EventTableCellView(identifier: tableColumn.identifier)
+            column.configure(cell, with: loadedSummary ?? rowSnapshots[row])
             return cell
         }
 
-        private func eventTimeCell(
-            in tableView: NSTableView,
-            identifier: NSUserInterfaceItemIdentifier,
-            summary: MacFSWEventRowSummary?
-        ) -> NSView {
-            let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView ?? NSTableCellView()
-            cell.identifier = identifier
-
-            let imageView: NSImageView
-            let textField: NSTextField
-            if let existing = cell.imageView {
-                imageView = existing
-            } else {
-                imageView = NSImageView()
-                imageView.translatesAutoresizingMaskIntoConstraints = false
-                imageView.imageScaling = .scaleProportionallyDown
-                cell.addSubview(imageView)
-                cell.imageView = imageView
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            let identifier = NSUserInterfaceItemIdentifier("EventRow")
+            if let rowView = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableRowView {
+                return rowView
             }
-            if let existing = cell.textField {
-                textField = existing
-            } else {
-                textField = NSTextField(labelWithString: "")
-                textField.translatesAutoresizingMaskIntoConstraints = false
-                textField.lineBreakMode = .byTruncatingTail
-                textField.maximumNumberOfLines = 1
-                cell.addSubview(textField)
-                cell.textField = textField
-            }
-
-            if imageView.constraints.isEmpty {
-                NSLayoutConstraint.activate([
-                    imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 7),
-                    imageView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    imageView.widthAnchor.constraint(equalToConstant: 18),
-                    imageView.heightAnchor.constraint(equalToConstant: 18),
-                    textField.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 7),
-                    textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-                    textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                ])
-            }
-
-            let symbolName = summary.map { symbol(for: $0.eventType) } ?? "ellipsis"
-            let label = summary.map(operationTooltip(for:)) ?? "Loading operation"
-            let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .medium))
-            image?.isTemplate = true
-
-            imageView.image = image
-            imageView.contentTintColor = summary.map { operationColor(for: $0.eventType) } ?? .secondaryLabelColor
-            imageView.setAccessibilityLabel(label)
-            textField.stringValue = summary.map { format(timestampNS: $0.timestampNS) } ?? "..."
-            textField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-            textField.textColor = textColor(for: "time", summary: summary)
-            cell.toolTip = label
-            return cell
+            let rowView = NSTableRowView()
+            rowView.identifier = identifier
+            // One layer per row instead of one per cell: a screenful of new
+            // rows otherwise means ~150 backing stores to draw and commit.
+            rowView.canDrawSubviewsIntoLayer = true
+            return rowView
         }
 
-        private func operationTooltip(for summary: MacFSWEventRowSummary) -> String {
-            let bucket = MacFSWOperationBucket.bucket(for: summary.eventType).title
-            return "\(summary.eventType.rawValue.uppercased()) · \(bucket)"
-        }
-
-        private func operationColor(for type: MacFSWEventType) -> NSColor {
-            switch MacFSWOperationBucket.bucket(for: type) {
-            case .read:
-                .systemBlue
-            case .create:
-                .systemTeal
-            case .write:
-                .systemIndigo
-            case .rename:
-                .systemPurple
-            case .delete:
-                .systemRed
-            case .metadata:
-                .systemOrange
-            case .link:
-                .systemMint
-            case .unknown:
-                .secondaryLabelColor
+        /// Typing in the table jumps to a row whose process or path starts
+        /// with what was typed. Cells have no text field for AppKit to read.
+        func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
+            guard let summary = rowProvider(row) ?? rowSnapshots[row] else {
+                return nil
+            }
+            switch tableColumn.flatMap({ EventTableColumn(rawValue: $0.identifier.rawValue) }) {
+            case .process: return summary.processName
+            case .path: return (summary.targetPath as NSString).lastPathComponent
+            default: return nil
             }
         }
 
@@ -149,6 +66,7 @@ extension EventTableView.Coordinator {
                 return
             }
             lockCurrentUserSelection(row: row)
+            setFollowing(false, notify: false)
             onUserWillSelect(row)
         }
 
@@ -305,28 +223,13 @@ extension EventTableView.Coordinator {
                 name: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView
             )
+            lastClipBounds = scrollView.contentView.bounds
         }
 
         func stopObserving() {
             NotificationCenter.default.removeObserver(self)
             observedClipView = nil
-        }
-
-        func scrollToLive() {
-            guard let tableView, rowCount > 0 else {
-                return
-            }
-            isProgrammaticScroll = true
-            tableView.scrollRowToVisible(rowCount - 1)
-            lastObservedVisibleBottom = tableView.enclosingScrollView?.contentView.bounds.maxY
-            requestVisibleRows()
-            reportLiveEdgeIfNeeded(force: true)
-            NSObject.cancelPreviousPerformRequests(
-                withTarget: self,
-                selector: #selector(clearProgrammaticScroll),
-                object: nil
-            )
-            perform(#selector(clearProgrammaticScroll), with: nil, afterDelay: 0)
+            stopFollowLink()
         }
 
         func requestVisibleRows() {

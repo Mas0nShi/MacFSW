@@ -68,11 +68,7 @@ public struct MacFSWEventQuery: Codable, Equatable, Sendable {
     }
 
     public func visibleCount(totalCount: Int) -> Int {
-        let totalCount = max(0, totalCount)
-        guard hasVisibleLimit else {
-            return totalCount
-        }
-        return min(totalCount, limit)
+        hasVisibleLimit ? min(totalCount, limit) : totalCount
     }
 
     public func matches(_ event: MacFSWFileEvent) -> Bool {

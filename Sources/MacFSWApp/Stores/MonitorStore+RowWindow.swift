@@ -1,12 +1,7 @@
-import AppKit
-import Combine
-import Darwin
-import MacFSWAnalysis
+import Foundation
 import MacFSWCore
-import SwiftUI
-import UniformTypeIdentifiers
 
-extension MacFSWAppCoordinator {
+extension MonitorStore {
     func cachedRow(at row: Int) -> MacFSWEventRowSummary? {
         markRowPageAccess(row / rowPageSize)
         return rowCache[row]
@@ -26,13 +21,6 @@ extension MacFSWAppCoordinator {
         let expandedLower = max(0, lowerBound - 120)
         let expandedUpper = min(visibleEventCount, upperBound + 240)
         loadPages(for: expandedLower..<expandedUpper)
-    }
-
-    func liveEdgeChanged(_ isAtLiveEdge: Bool) {
-        isViewingLiveEdge = isAtLiveEdge
-        if isAtLiveEdge, followMode == .live {
-            unseenEventCount = 0
-        }
     }
 
     func preloadRowsForCurrentViewport() {
@@ -66,10 +54,6 @@ extension MacFSWAppCoordinator {
         }
     }
 
-    func visibleCount(totalCount: Int, query: MacFSWEventQuery) -> Int {
-        query.visibleCount(totalCount: totalCount)
-    }
-
     func cacheAppendedRows(
         _ summaries: [MacFSWEventRowSummary],
         previousCount: Int,
@@ -90,51 +74,6 @@ extension MacFSWAppCoordinator {
         markLoadedPagesIfComplete(overlapping: cacheStart..<newCount, visibleCount: newCount)
         evictRowPagesIfNeeded(visibleCount: newCount)
         rowCacheVersion += 1
-        return true
-    }
-
-    func slideRowWindowCache(
-        shiftedBy shiftCount: Int,
-        appendedVisibleCount: Int,
-        appendedSummaries: [MacFSWEventRowSummary],
-        visibleCount: Int
-    ) -> Bool {
-        let shiftCount = min(max(0, shiftCount), visibleCount)
-        let appendedVisibleCount = min(max(0, appendedVisibleCount), visibleCount)
-        guard shiftCount > 0, appendedVisibleCount > 0, appendedSummaries.count >= appendedVisibleCount else {
-            return false
-        }
-
-        queryGeneration += 1
-        cancelRowLoads()
-
-        let appendedStart = visibleCount - appendedVisibleCount
-        var shiftedCache: [Int: MacFSWEventRowSummary] = [:]
-        shiftedCache.reserveCapacity(min(rowCache.count + appendedVisibleCount, visibleCount))
-
-        for (row, summary) in rowCache {
-            let shiftedRow = row - shiftCount
-            if shiftedRow >= 0, shiftedRow < appendedStart {
-                shiftedCache[shiftedRow] = summary
-            }
-        }
-
-        for (offset, summary) in appendedSummaries.suffix(appendedVisibleCount).enumerated() {
-            shiftedCache[appendedStart + offset] = summary
-        }
-
-        rowCache = shiftedCache
-        loadedRowPages.removeAll(keepingCapacity: true)
-        rowPageAccessTicks.removeAll(keepingCapacity: true)
-        if lastRequestedRowRange.lowerBound < lastRequestedRowRange.upperBound {
-            let shiftedLower = max(0, lastRequestedRowRange.lowerBound - shiftCount)
-            let shiftedUpper = max(shiftedLower, min(visibleCount, lastRequestedRowRange.upperBound - shiftCount))
-            lastRequestedRowRange = shiftedLower..<shiftedUpper
-        }
-        rebuildLoadedPages(visibleCount: visibleCount)
-        evictRowPagesIfNeeded(visibleCount: visibleCount)
-        rowCacheVersion += 1
-        rowCacheResetSerial += 1
         return true
     }
 
@@ -243,31 +182,27 @@ extension MacFSWAppCoordinator {
                 guard !Task.isCancelled else {
                     return
                 }
-                await MainActor.run {
-                    guard let self, self.queryGeneration == generation else {
-                        return
-                    }
-                    self.inFlightRowPages.remove(page)
-                    self.rowLoadTasks[page] = nil
-                    for (offset, row) in rows.enumerated() {
-                        self.rowCache[range.lowerBound + offset] = row
-                    }
-                    self.loadedRowPages.insert(page)
-                    self.markRowPageAccess(page)
-                    self.promoteSelectedRowIfLoaded(in: range)
-                    self.evictRowPagesIfNeeded()
-                    self.rowCacheVersion += 1
-                    self.lastUpdatedAt = Date()
+                guard let self, self.queryGeneration == generation else {
+                    return
                 }
+                self.inFlightRowPages.remove(page)
+                self.rowLoadTasks[page] = nil
+                for (offset, row) in rows.enumerated() {
+                    self.rowCache[range.lowerBound + offset] = row
+                }
+                self.loadedRowPages.insert(page)
+                self.markRowPageAccess(page)
+                self.promoteSelectedRowIfLoaded(in: range)
+                self.evictRowPagesIfNeeded()
+                self.rowCacheVersion += 1
+                self.lastUpdatedAt = Date()
             } catch {
-                await MainActor.run {
-                    guard let self, self.queryGeneration == generation else {
-                        return
-                    }
-                    self.inFlightRowPages.remove(page)
-                    self.rowLoadTasks[page] = nil
-                    self.reportError(error)
+                guard let self, self.queryGeneration == generation else {
+                    return
                 }
+                self.inFlightRowPages.remove(page)
+                self.rowLoadTasks[page] = nil
+                self.reportError(error)
             }
         }
     }

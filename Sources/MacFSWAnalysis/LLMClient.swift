@@ -116,7 +116,6 @@ public enum MacFSWLLMClientError: Error, LocalizedError, Equatable, Sendable {
     case missingAPIKey
     case missingModel
     case invalidBaseURL(String)
-    case invalidRequestBody
     case httpError(statusCode: Int, body: String)
     case streamError(body: String)
     case noTextInResponse
@@ -129,8 +128,6 @@ public enum MacFSWLLMClientError: Error, LocalizedError, Equatable, Sendable {
             return "Configure an LLM model in Settings before running analysis."
         case .invalidBaseURL(let url):
             return "Invalid LLM base URL: \(url)"
-        case .invalidRequestBody:
-            return "Failed to build the LLM request body."
         case .httpError(let statusCode, let body):
             let details = MacFSWLLMHTTPErrorDetails(statusCode: statusCode, body: body)
             return "LLM request failed with \(details.title): \(details.message)"
@@ -193,9 +190,25 @@ public final class MacFSWLLMClient: @unchecked Sendable {
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = TimeInterval(settings.timeoutSeconds)
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue(settings.streamResponses ? "text/event-stream" : "application/json", forHTTPHeaderField: "Accept")
         urlRequest.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.httpBody = try Self.requestBody(for: request)
+        if settings.streamResponses {
+            urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            // Many gateways gzip SSE responses and only flush per compression
+            // frame — from the client's view the whole reply arrives in one
+            // burst at the end. `identity` tells the server not to compress;
+            // URLSession also stops adding its own Accept-Encoding once we
+            // set one explicitly, so nothing else gets negotiated back on.
+            urlRequest.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+            urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        } else {
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        }
+        urlRequest.httpBody = try Self.requestBody(
+            settings: settings,
+            systemPrompt: request.systemPrompt,
+            userPrompt: request.userPrompt
+        )
         return urlRequest
     }
 
@@ -217,43 +230,42 @@ public final class MacFSWLLMClient: @unchecked Sendable {
         return components.url
     }
 
-    public static func requestBody(for request: MacFSWLLMRequest) throws -> Data {
-        var settings = request.settings
-        settings.model = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        let body: [String: Any]
+    private static func requestBody(
+        settings: MacFSWLLMSettings,
+        systemPrompt: String,
+        userPrompt: String
+    ) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
         switch settings.endpoint {
         case .responses:
-            body = [
-                "model": settings.model,
-                "input": [
-                    ["role": "developer", "content": request.systemPrompt],
-                    ["role": "user", "content": request.userPrompt],
+            return try encoder.encode(ResponsesBody(
+                model: settings.model,
+                input: [
+                    ChatMessage(role: "developer", content: systemPrompt),
+                    ChatMessage(role: "user", content: userPrompt),
                 ],
-                "max_output_tokens": settings.tokenBudget,
-                "stream": settings.streamResponses,
-            ]
+                maxOutputTokens: settings.tokenBudget,
+                stream: settings.streamResponses
+            ))
         case .chatCompletions:
-            body = [
-                "model": settings.model,
-                "messages": [
-                    ["role": "system", "content": request.systemPrompt],
-                    ["role": "user", "content": request.userPrompt],
+            return try encoder.encode(ChatCompletionsBody(
+                model: settings.model,
+                messages: [
+                    ChatMessage(role: "system", content: systemPrompt),
+                    ChatMessage(role: "user", content: userPrompt),
                 ],
-                "max_tokens": settings.tokenBudget,
-                "stream": settings.streamResponses,
-            ]
+                maxTokens: settings.tokenBudget,
+                stream: settings.streamResponses
+            ))
         case .completions:
-            body = [
-                "model": settings.model,
-                "prompt": "\(request.systemPrompt)\n\n\(request.userPrompt)",
-                "max_tokens": settings.tokenBudget,
-                "stream": settings.streamResponses,
-            ]
+            return try encoder.encode(CompletionsBody(
+                model: settings.model,
+                prompt: "\(systemPrompt)\n\n\(userPrompt)",
+                maxTokens: settings.tokenBudget,
+                stream: settings.streamResponses
+            ))
         }
-        guard JSONSerialization.isValidJSONObject(body) else {
-            throw MacFSWLLMClientError.invalidRequestBody
-        }
-        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
     }
 
     private func stream(
@@ -273,13 +285,11 @@ public final class MacFSWLLMClient: @unchecked Sendable {
                     }
 
                     var parser = MacFSWSSEParser()
-                    for try await line in bytes.lines {
-                        try Task.checkCancellation()
-                        let events = parser.feed(line: line)
+
+                    func handle(_ events: [MacFSWSSEEvent]) throws -> Bool {
                         for event in events {
                             if event.data == "[DONE]" {
-                                continuation.finish()
-                                return
+                                return true
                             }
                             if event.event == "error" || !MacFSWLLMDeltaExtractor.errorMessages(from: event.data).isEmpty {
                                 throw MacFSWLLMClientError.streamError(body: event.data)
@@ -288,15 +298,37 @@ public final class MacFSWLLMClient: @unchecked Sendable {
                                 continuation.yield(MacFSWLLMDelta(text: text))
                             }
                         }
+                        return false
                     }
-                    for event in parser.finish() where event.data != "[DONE]" {
-                        if event.event == "error" || !MacFSWLLMDeltaExtractor.errorMessages(from: event.data).isEmpty {
-                            throw MacFSWLLMClientError.streamError(body: event.data)
+
+                    // Lines are split by hand: `bytes.lines` silently drops
+                    // empty lines, and empty lines are exactly what delimits
+                    // SSE events — with them gone the parser would buffer
+                    // every event until EOF and the "stream" would replay
+                    // after completion. Splitting on 0x0A is UTF-8 safe
+                    // (multi-byte sequences never contain it); the parser
+                    // already trims a trailing "\r".
+                    var lineData = Data()
+                    for try await byte in bytes {
+                        guard byte == UInt8(ascii: "\n") else {
+                            lineData.append(byte)
+                            continue
                         }
-                        for text in try MacFSWLLMDeltaExtractor.deltaTexts(from: event.data, endpoint: endpoint) where !text.isEmpty {
-                            continuation.yield(MacFSWLLMDelta(text: text))
+                        try Task.checkCancellation()
+                        let line = String(decoding: lineData, as: UTF8.self)
+                        lineData.removeAll(keepingCapacity: true)
+                        if try handle(parser.feed(line: line)) {
+                            continuation.finish()
+                            return
                         }
                     }
+                    if !lineData.isEmpty {
+                        if try handle(parser.feed(line: String(decoding: lineData, as: UTF8.self))) {
+                            continuation.finish()
+                            return
+                        }
+                    }
+                    _ = try handle(parser.finish().filter { $0.data != "[DONE]" })
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -617,5 +649,46 @@ public enum MacFSWLLMDeltaExtractor {
             }
         }
         return nil
+    }
+}
+
+private struct ChatMessage: Encodable {
+    var role: String
+    var content: String
+}
+
+private struct ResponsesBody: Encodable {
+    var model: String
+    var input: [ChatMessage]
+    var maxOutputTokens: Int
+    var stream: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case model, input, stream
+        case maxOutputTokens = "max_output_tokens"
+    }
+}
+
+private struct ChatCompletionsBody: Encodable {
+    var model: String
+    var messages: [ChatMessage]
+    var maxTokens: Int
+    var stream: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case model, messages, stream
+        case maxTokens = "max_tokens"
+    }
+}
+
+private struct CompletionsBody: Encodable {
+    var model: String
+    var prompt: String
+    var maxTokens: Int
+    var stream: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case model, prompt, stream
+        case maxTokens = "max_tokens"
     }
 }
